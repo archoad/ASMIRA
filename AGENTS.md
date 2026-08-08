@@ -239,9 +239,9 @@ La découverte passive n’autorise pas l’énumération active. Le mode actif 
   de `/etc/asmira/asmira.env` dans un sous-shell avant `runuser` a été validé
   sur `srv`. La clé Shodan est ainsi disponible pendant les pilotes sans être
   placée dans les arguments ni conservée dans la documentation.
-- **2026-08-08 — Création du dépôt GitHub privé.** Le dépôt
-  `archoad/ASMIRA` utilise `main`, exécute la syntaxe et les tests dans GitHub
-  Actions et ne prévoit aucune release. Avant le premier commit, les rapports,
-  inventaires, captures, bases GeoIP/GeoJSON et périmètres réseau réels ont été
-  exclus ou externalisés, puis le contenu destiné à GitHub a été contrôlé avec
-  Gitleaks.
+- **2026-08-08 — Publication du dépôt GitHub sous GPL v3.** Le dépôt public
+  `archoad/ASMIRA` utilise `main`, distribue le projet sous `GPL-3.0-only`,
+  exécute la syntaxe et les tests dans GitHub Actions et ne prévoit aucune
+  release. Avant sa publication, les rapports, inventaires, captures, bases
+  GeoIP/GeoJSON et périmètres réseau réels ont été exclus ou externalisés, puis
+  le contenu destiné à GitHub a été contrôlé avec Gitleaks.

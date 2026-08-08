@@ -11,6 +11,7 @@ charger des rapports d'exécution potentiellement sensibles.
 | Présentation et démarrage rapide | [`README.md`](README.md) |
 | Directives de contribution, sécurité et tests | [`AGENTS.md`](AGENTS.md) |
 | Signalement privé et données à ne pas publier | [`SECURITY.md`](SECURITY.md) |
+| Licence GNU GPL version 3 uniquement | [`LICENSE`](LICENSE) |
 | État confirmé, décisions et questions ouvertes | [`MEMORY.md`](MEMORY.md) |
 | Orchestrateur configuré et exports Elastic | [`asmira.py`](asmira.py) |
 | Configuration, identifiants et écritures atomiques | [`asmiraCommon.py`](asmiraCommon.py) |

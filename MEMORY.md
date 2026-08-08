@@ -151,8 +151,8 @@ confirmé fonctionnel le 3 août 2026 avec 100 endpoints.
   sous-processus ; ils ne contactent aucune cible réelle.
 - Les rapports, captures, caches et inventaires sensibles ne sont pas
   versionnés.
-- Le dépôt GitHub privé est `archoad/ASMIRA`, sa branche principale est `main`
-  et aucune release GitHub n’est prévue.
+- Le dépôt GitHub public est `archoad/ASMIRA`, sa branche principale est `main`,
+  sa licence est `GPL-3.0-only` et aucune release GitHub n’est prévue.
 - Les bases GeoIP, le GeoJSON local et les plages propres à l’opérateur ne sont
   pas versionnés. Les préfixes facultatifs sont lus depuis
   `ASMIRA_INTERNAL_NETWORKS` dans l’environnement protégé.
@@ -251,8 +251,8 @@ python3 -m pytest -q
   temporairement avant un pilote manuel a été confirmée fonctionnelle sur
   `srv`. Seul ce mode de chargement est documenté ; aucune valeur secrète n’est
   conservée.
-- **2026-08-08 :** création du dépôt GitHub privé `archoad/ASMIRA` sur la
-  branche `main`, sans mécanisme de release. Ajout du README, de la politique de
-  sécurité et d’une CI de tests. Les données générées, bases GeoIP/GeoJSON et
-  périmètres réseau réels sont exclus du premier commit, validé localement par
-  Gitleaks avant publication.
+- **2026-08-08 :** publication du dépôt GitHub `archoad/ASMIRA` sur la branche
+  `main` sous licence `GPL-3.0-only`, sans mécanisme de release. Ajout du README,
+  de la politique de sécurité et d’une CI de tests. Les données générées, bases
+  GeoIP/GeoJSON et périmètres réseau réels sont exclus des commits, validés
+  localement par Gitleaks avant publication.

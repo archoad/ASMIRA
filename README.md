@@ -83,3 +83,8 @@ python3 webTLS.py --authorized-active-scan
 Pour le déploiement orchestré et l’intégration Elastic, consulter
 [`DEPLOYMENT.md`](DEPLOYMENT.md). Le projet est distribué depuis son code
 source ; aucune release GitHub n’est prévue.
+
+## Licence
+
+Asmira est distribué sous la licence **GNU General Public License version 3
+uniquement** (`GPL-3.0-only`). Voir [`LICENSE`](LICENSE).
