@@ -1,0 +1,47 @@
+# Ce fichier ne doit contenir aucun mot de passe, token ni clé d’API.
+# Les secrets optionnels sont chargés depuis /etc/asmira/asmira.env.
+
+[targets]
+domains =
+	example.org
+	example.net
+
+[discovery]
+sources = shodan-ctl,subfinder,shodan-dns,certspotter
+enable_amass = false
+collector_workers = 4
+dns_workers = 20
+source_timeout = 600
+dns_timeout = 4
+wildcard_samples = 2
+max_pages = 1000
+shodan_history = true
+
+[active_scan]
+enabled = true
+# Cette valeur confirme durablement que tous les domaines ci-dessus sont
+# autorisés pour la reconnaissance active exécutée par le timer.
+authorized = false
+endpoint_workers = 4
+subprocess_budget = 16
+checkpoint_every = 25
+# Laisser vide en production. Utiliser 100 pour le premier pilote.
+max_endpoints =
+screenshots = false
+graphs = false
+xlsx = false
+
+[storage]
+runs_dir = /var/lib/asmira/runs
+export_dir = /var/lib/asmira/export
+pictures_dir = /var/lib/asmira/pictures
+# Rétention locale des exports déjà destinés à Elastic Agent.
+retention_days = 14
+
+[tools]
+# Laisser vide pour utiliser la détection via PATH.
+subfinder =
+amass =
+nmap =
+openssl =
+netcat =

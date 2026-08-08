@@ -1,0 +1,201 @@
+{
+  "template": {
+    "mappings": {
+      "dynamic": false,
+      "properties": {
+        "@timestamp": {
+          "type": "date"
+        },
+        "data_stream": {
+          "properties": {
+            "type": { "type": "constant_keyword" },
+            "dataset": { "type": "constant_keyword" },
+            "namespace": { "type": "constant_keyword" }
+          }
+        },
+        "event": {
+          "properties": {
+            "id": { "type": "keyword" },
+            "kind": { "type": "keyword" },
+            "category": { "type": "keyword" },
+            "type": { "type": "keyword" },
+            "dataset": { "type": "keyword" },
+            "action": { "type": "keyword" },
+            "outcome": { "type": "keyword" }
+          }
+        },
+        "observer": {
+          "properties": {
+            "hostname": { "type": "keyword" },
+            "product": { "type": "keyword" },
+            "type": { "type": "keyword" },
+            "vendor": { "type": "keyword" }
+          }
+        },
+        "host": {
+          "properties": {
+            "name": { "type": "keyword" },
+            "ip": { "type": "ip" }
+          }
+        },
+        "server": {
+          "properties": {
+            "address": { "type": "keyword" },
+            "domain": { "type": "keyword" },
+            "registered_domain": { "type": "keyword" },
+            "ip": { "type": "ip" },
+            "geo": {
+              "properties": {
+                "country_iso_code": { "type": "keyword" },
+                "location": { "type": "geo_point" }
+              }
+            },
+            "as": {
+              "properties": {
+                "number": { "type": "long" },
+                "organization": {
+                  "properties": {
+                    "name": { "type": "keyword" }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "dns": {
+          "properties": {
+            "question": {
+              "properties": {
+                "name": { "type": "keyword" },
+                "registered_domain": { "type": "keyword" }
+              }
+            }
+          }
+        },
+        "http": {
+          "properties": {
+            "response": {
+              "properties": {
+                "status_code": { "type": "integer" }
+              }
+            }
+          }
+        },
+        "asmira": {
+          "properties": {
+            "asset": {
+              "properties": {
+                "id": { "type": "keyword" }
+              }
+            },
+            "run": {
+              "properties": {
+                "id": { "type": "keyword" },
+                "status": { "type": "keyword" },
+                "partial": { "type": "boolean" },
+                "coverage_reasons": { "type": "keyword" },
+                "started_at": { "type": "date" },
+                "finished_at": { "type": "date" },
+                "duration_seconds": { "type": "double" },
+                "failed_sources": { "type": "keyword" },
+                "skipped_sources": { "type": "keyword" },
+                "error": { "type": "keyword", "ignore_above": 2048 },
+                "counts": {
+                  "properties": {
+                    "domains": { "type": "integer" },
+                    "candidates": { "type": "integer" },
+                    "inventory": { "type": "integer" },
+                    "resolvable_hosts": { "type": "integer" },
+                    "endpoints": { "type": "integer" },
+                    "failed_endpoints": { "type": "integer" },
+                    "disappeared_endpoints": { "type": "integer" },
+                    "failed_sources": { "type": "integer" },
+                    "skipped_sources": { "type": "integer" }
+                  }
+                }
+              }
+            },
+            "discovery": {
+              "properties": {
+                "wildcard_pattern": { "type": "boolean" },
+                "sources": { "type": "keyword" },
+                "resolvable": { "type": "boolean" },
+                "dns_status": { "type": "keyword" },
+                "dns_wildcard_zone": { "type": "boolean" },
+                "dns_wildcard_match": { "type": "boolean" },
+                "wildcard_zones": { "type": "keyword" }
+              }
+            },
+            "exposure": {
+              "properties": {
+                "present": { "type": "boolean" },
+                "change": { "type": "keyword" },
+                "last_seen_at": { "type": "date" },
+                "live": { "type": "keyword" },
+                "port": {
+                  "properties": {
+                    "22": {
+                      "properties": {
+                        "state": { "type": "keyword" }
+                      }
+                    },
+                    "80": {
+                      "properties": {
+                        "state": { "type": "keyword" }
+                      }
+                    },
+                    "443": {
+                      "properties": {
+                        "state": { "type": "keyword" }
+                      }
+                    }
+                  }
+                },
+                "http": {
+                  "properties": {
+                    "server": { "type": "keyword" },
+                    "title": { "type": "keyword", "ignore_above": 1024 },
+                    "header_hash": { "type": "keyword" }
+                  }
+                },
+                "tls": {
+                  "properties": {
+                    "supported_versions": { "type": "keyword" },
+                    "cipher_suites": { "type": "keyword" },
+                    "negotiated_version": { "type": "keyword" },
+                    "negotiated_cipher": { "type": "keyword" },
+                    "self_signed": { "type": "boolean" },
+                    "chain_valid": { "type": "boolean" },
+                    "certificate_sha256": { "type": "keyword" },
+                    "certificate_public_key_algorithm_oid": { "type": "keyword" },
+                    "certificate_signature_algorithm_oid": { "type": "keyword" },
+                    "certificate_pqc_algorithms": { "type": "keyword" },
+                    "certificate_pqc_status": { "type": "keyword" },
+                    "certificate_not_after": { "type": "date" },
+                    "certificate_days_remaining": { "type": "integer" },
+                    "certificate_expired": { "type": "boolean" },
+                    "issuer_organization": { "type": "keyword" }
+                  }
+                },
+                "scan": {
+                  "properties": {
+                    "status": { "type": "keyword" },
+                    "error": { "type": "keyword", "ignore_above": 2048 },
+                    "duration_seconds": { "type": "double" }
+                  }
+                }
+              }
+            },
+            "raw": {
+              "type": "object",
+              "dynamic": false
+            }
+          }
+        }
+      }
+    }
+  },
+  "_meta": {
+    "description": "Mappings ECS et Asmira communs aux data streams et index latest"
+  }
+}

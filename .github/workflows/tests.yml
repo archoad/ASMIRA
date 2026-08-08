@@ -1,0 +1,36 @@
+name: Tests
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Récupérer le dépôt
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+
+      - name: Installer Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Installer les dépendances de test
+        run: python -m pip install -r requirements-dev.txt
+
+      - name: Vérifier la syntaxe
+        run: >-
+          python -m py_compile
+          asmira.py asmiraCommon.py fqdnCollect.py webTLS.py elastic/setup.py
+          tests/test_asmira.py tests/test_deployment_assets.py
+          tests/test_fqdn_collect.py tests/test_web_tls.py
+
+      - name: Exécuter les tests
+        run: python -m pytest -q

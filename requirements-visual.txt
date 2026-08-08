@@ -1,0 +1,5 @@
+-r requirements.txt
+geopandas==1.1.1
+matplotlib==3.11.1
+seaborn==0.13.2
+selenium==4.38.0

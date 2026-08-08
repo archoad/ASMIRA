@@ -1,0 +1,12 @@
+[Unit]
+Description=Exécution hebdomadaire d'Asmira le lundi soir
+
+[Timer]
+OnCalendar=Mon *-*-* 20:00:00 Europe/Paris
+RandomizedDelaySec=30m
+AccuracySec=1m
+Persistent=true
+Unit=asmira.service
+
+[Install]
+WantedBy=timers.target

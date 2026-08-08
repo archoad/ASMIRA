@@ -1,0 +1,35 @@
+[Unit]
+Description=Asmira - cartographie de la surface d'exposition externe
+Documentation=file:///opt/asmira/DEPLOYMENT.md
+Wants=network-online.target
+After=network-online.target
+ConditionPathExists=/etc/asmira/asmira.conf
+
+[Service]
+Type=oneshot
+User=asmira
+Group=asmira
+WorkingDirectory=/opt/asmira
+Environment=HOME=/var/lib/asmira
+Environment=PYTHONUNBUFFERED=1
+EnvironmentFile=-/etc/asmira/asmira.env
+ExecStart=/opt/asmira/venv/bin/python /opt/asmira/asmira.py --config /etc/asmira/asmira.conf
+UMask=0027
+Nice=10
+IOSchedulingClass=idle
+CPUWeight=25
+IOWeight=25
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+ReadWritePaths=/var/lib/asmira
+TimeoutStartSec=infinity
+
+[Install]
+WantedBy=multi-user.target

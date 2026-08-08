@@ -1,0 +1,452 @@
+{
+  "title": "Asmira — Surface d’exposition globale",
+  "description": "Inventaire courant, exposition HTTP/TLS, santé des scans et historique hebdomadaire Asmira.",
+  "time_range": {
+    "from": "now-90d",
+    "to": "now"
+  },
+  "pinned_panels": [
+    {
+      "type": "options_list_control",
+      "width": "medium",
+      "grow": false,
+      "config": {
+        "title": "Domaine",
+        "values_source": "field",
+        "data_view_id": "asmira-exposure-current",
+        "field_name": "server.registered_domain",
+        "use_global_filters": true,
+        "ignore_validations": false,
+        "exclude": false,
+        "exists_selected": false,
+        "run_past_timeout": false,
+        "search_technique": "wildcard",
+        "selected_options": [],
+        "single_select": false,
+        "sort": { "by": "_key", "direction": "asc" }
+      }
+    },
+    {
+      "type": "options_list_control",
+      "width": "large",
+      "grow": true,
+      "config": {
+        "title": "FQDN",
+        "values_source": "field",
+        "data_view_id": "asmira-exposure-current",
+        "field_name": "server.domain",
+        "use_global_filters": true,
+        "ignore_validations": false,
+        "exclude": false,
+        "exists_selected": false,
+        "run_past_timeout": false,
+        "search_technique": "wildcard",
+        "selected_options": [],
+        "single_select": false,
+        "sort": { "by": "_key", "direction": "asc" }
+      }
+    }
+  ],
+  "panels": [
+    {
+      "grid": { "x": 0, "y": 0, "w": 12, "h": 5 },
+      "type": "vis",
+      "config": {
+        "type": "metric",
+        "data_source": {
+          "type": "data_view_spec",
+          "index_pattern": "asmira-exposure-current",
+          "time_field": "@timestamp"
+        },
+        "metrics": [
+          {
+            "type": "primary",
+            "operation": "unique_count",
+            "field": "server.domain",
+            "label": "FQDN exposés"
+          }
+        ]
+      }
+    },
+    {
+      "grid": { "x": 12, "y": 0, "w": 12, "h": 5 },
+      "type": "vis",
+      "config": {
+        "type": "metric",
+        "data_source": {
+          "type": "data_view_spec",
+          "index_pattern": "asmira-exposure-current",
+          "time_field": "@timestamp"
+        },
+        "metrics": [
+          {
+            "type": "primary",
+            "operation": "count",
+            "label": "Endpoints FQDN/IP"
+          }
+        ]
+      }
+    },
+    {
+      "grid": { "x": 24, "y": 0, "w": 12, "h": 5 },
+      "type": "vis",
+      "config": {
+        "type": "metric",
+        "data_source": {
+          "type": "data_view_spec",
+          "index_pattern": "asmira-exposure-current",
+          "time_field": "@timestamp"
+        },
+        "metrics": [
+          {
+            "type": "primary",
+            "operation": "unique_count",
+            "field": "server.ip",
+            "label": "IP uniques"
+          }
+        ]
+      }
+    },
+    {
+      "grid": { "x": 36, "y": 0, "w": 12, "h": 5 },
+      "type": "vis",
+      "config": {
+        "type": "metric",
+        "data_source": {
+          "type": "data_view_spec",
+          "index_pattern": "logs-asmira.run-*",
+          "time_field": "@timestamp"
+        },
+        "metrics": [
+          {
+            "type": "primary",
+            "operation": "max",
+            "field": "asmira.run.duration_seconds",
+            "label": "Durée maximale sur la période (s)"
+          }
+        ]
+      }
+    },
+    {
+      "grid": { "x": 0, "y": 5, "w": 16, "h": 10 },
+      "type": "vis",
+      "config": {
+        "type": "pie",
+        "title": "État du port HTTPS",
+        "data_source": {
+          "type": "data_view_spec",
+          "index_pattern": "asmira-exposure-current",
+          "time_field": "@timestamp"
+        },
+        "metrics": [{ "operation": "count" }],
+        "group_by": [
+          {
+            "operation": "terms",
+            "fields": ["asmira.exposure.port.443.state"],
+            "limit": 9
+          }
+        ]
+      }
+    },
+    {
+      "grid": { "x": 16, "y": 5, "w": 16, "h": 10 },
+      "type": "vis",
+      "config": {
+        "type": "pie",
+        "title": "Versions TLS supportées",
+        "data_source": {
+          "type": "data_view_spec",
+          "index_pattern": "asmira-exposure-current",
+          "time_field": "@timestamp"
+        },
+        "metrics": [{ "operation": "count" }],
+        "group_by": [
+          {
+            "operation": "terms",
+            "fields": ["asmira.exposure.tls.supported_versions"],
+            "limit": 9
+          }
+        ]
+      }
+    },
+    {
+      "grid": { "x": 32, "y": 5, "w": 16, "h": 10 },
+      "type": "vis",
+      "config": {
+        "type": "pie",
+        "title": "État des analyses",
+        "data_source": {
+          "type": "data_view_spec",
+          "index_pattern": "asmira-exposure-current",
+          "time_field": "@timestamp"
+        },
+        "metrics": [{ "operation": "count" }],
+        "group_by": [
+          {
+            "operation": "terms",
+            "fields": ["asmira.exposure.scan.status"],
+            "limit": 9
+          }
+        ]
+      }
+    },
+    {
+      "grid": { "x": 0, "y": 15, "w": 24, "h": 10 },
+      "type": "vis",
+      "config": {
+        "type": "xy",
+        "title": "Endpoints par domaine",
+        "layers": [
+          {
+            "type": "bar_stacked",
+            "data_source": {
+              "type": "data_view_spec",
+              "index_pattern": "asmira-exposure-current",
+              "time_field": "@timestamp"
+            },
+            "x": {
+              "operation": "terms",
+              "fields": ["server.registered_domain"],
+              "limit": 20
+            },
+            "y": [{ "operation": "count" }]
+          }
+        ]
+      }
+    },
+    {
+      "grid": { "x": 24, "y": 15, "w": 24, "h": 10 },
+      "type": "vis",
+      "config": {
+        "type": "xy",
+        "title": "Endpoints par ASN",
+        "layers": [
+          {
+            "type": "bar_stacked",
+            "data_source": {
+              "type": "data_view_spec",
+              "index_pattern": "asmira-exposure-current",
+              "time_field": "@timestamp"
+            },
+            "x": {
+              "operation": "terms",
+              "fields": ["server.as.organization.name"],
+              "limit": 20
+            },
+            "y": [{ "operation": "count" }]
+          }
+        ]
+      }
+    },
+    {
+      "grid": { "x": 0, "y": 25, "w": 24, "h": 10 },
+      "type": "vis",
+      "config": {
+        "type": "xy",
+        "title": "Volume historique d’endpoints",
+        "layers": [
+          {
+            "type": "line",
+            "data_source": {
+              "type": "data_view_spec",
+              "index_pattern": "logs-asmira.exposure-*",
+              "time_field": "@timestamp"
+            },
+            "x": { "operation": "date_histogram", "field": "@timestamp" },
+            "y": [{ "operation": "count" }],
+            "breakdown_by": {
+              "operation": "terms",
+              "fields": ["dns.question.registered_domain"],
+              "limit": 9
+            }
+          }
+        ]
+      }
+    },
+    {
+      "grid": { "x": 24, "y": 25, "w": 24, "h": 10 },
+      "type": "vis",
+      "config": {
+        "type": "xy",
+        "title": "Durée des cycles hebdomadaires",
+        "layers": [
+          {
+            "type": "line",
+            "data_source": {
+              "type": "data_view_spec",
+              "index_pattern": "logs-asmira.run-*",
+              "time_field": "@timestamp"
+            },
+            "x": { "operation": "date_histogram", "field": "@timestamp" },
+            "y": [
+              {
+                "operation": "max",
+                "field": "asmira.run.duration_seconds",
+                "label": "Durée (s)"
+              }
+            ],
+            "breakdown_by": {
+              "operation": "terms",
+              "fields": ["asmira.run.status"],
+              "limit": 3
+            }
+          }
+        ]
+      }
+    },
+    {
+      "grid": { "x": 0, "y": 35, "w": 48, "h": 15 },
+      "type": "vis",
+      "config": {
+        "type": "data_table",
+        "title": "Certificats expirés ou proches de l’expiration",
+        "data_source": {
+          "type": "esql",
+          "query": "FROM asmira-exposure-current | WHERE asmira.exposure.tls.certificate_days_remaining <= 30 | KEEP @timestamp, server.domain, server.ip, server.registered_domain, asmira.exposure.tls.certificate_not_after, asmira.exposure.tls.certificate_days_remaining, asmira.exposure.tls.issuer_organization | SORT asmira.exposure.tls.certificate_days_remaining ASC | LIMIT 200"
+        },
+        "rows": [
+          { "column": "@timestamp" },
+          { "column": "server.domain" },
+          { "column": "server.ip" },
+          { "column": "server.registered_domain" },
+          { "column": "asmira.exposure.tls.certificate_not_after" },
+          { "column": "asmira.exposure.tls.issuer_organization" }
+        ],
+        "metrics": [
+          { "column": "asmira.exposure.tls.certificate_days_remaining" }
+        ]
+      }
+    },
+    {
+      "grid": { "x": 0, "y": 50, "w": 48, "h": 15 },
+      "type": "vis",
+      "config": {
+        "type": "data_table",
+        "title": "Erreurs récentes de cartographie",
+        "data_source": {
+          "type": "esql",
+          "query": "FROM asmira-exposure-current | WHERE asmira.exposure.scan.status == \"failed\" | KEEP @timestamp, server.domain, server.ip, server.registered_domain, asmira.exposure.scan.duration_seconds, asmira.exposure.scan.error | SORT @timestamp DESC | LIMIT 200"
+        },
+        "rows": [
+          { "column": "@timestamp" },
+          { "column": "server.domain" },
+          { "column": "server.ip" },
+          { "column": "server.registered_domain" },
+          { "column": "asmira.exposure.scan.error" }
+        ],
+        "metrics": [
+          { "column": "asmira.exposure.scan.duration_seconds" }
+        ]
+      }
+    },
+    {
+      "grid": { "x": 0, "y": 65, "w": 16, "h": 10 },
+      "type": "vis",
+      "config": {
+        "type": "pie",
+        "title": "Certificats auto-signés",
+        "data_source": {
+          "type": "data_view_spec",
+          "index_pattern": "asmira-exposure-current",
+          "time_field": "@timestamp"
+        },
+        "metrics": [{ "operation": "count" }],
+        "group_by": [
+          {
+            "operation": "terms",
+            "fields": ["asmira.exposure.tls.self_signed"],
+            "limit": 3
+          }
+        ]
+      }
+    },
+    {
+      "grid": { "x": 16, "y": 65, "w": 16, "h": 10 },
+      "type": "vis",
+      "config": {
+        "type": "pie",
+        "title": "Validation des chaînes TLS",
+        "data_source": {
+          "type": "data_view_spec",
+          "index_pattern": "asmira-exposure-current",
+          "time_field": "@timestamp"
+        },
+        "metrics": [{ "operation": "count" }],
+        "group_by": [
+          {
+            "operation": "terms",
+            "fields": ["asmira.exposure.tls.chain_valid"],
+            "limit": 3
+          }
+        ]
+      }
+    },
+    {
+      "grid": { "x": 32, "y": 65, "w": 16, "h": 10 },
+      "type": "vis",
+      "config": {
+        "type": "pie",
+        "title": "Changements du dernier cycle",
+        "data_source": {
+          "type": "data_view_spec",
+          "index_pattern": "logs-asmira.exposure-*",
+          "time_field": "@timestamp"
+        },
+        "metrics": [{ "operation": "count" }],
+        "group_by": [
+          {
+            "operation": "terms",
+            "fields": ["asmira.exposure.change"],
+            "limit": 3
+          }
+        ]
+      }
+    },
+    {
+      "grid": { "x": 0, "y": 75, "w": 48, "h": 10 },
+      "type": "vis",
+      "config": {
+        "type": "pie",
+        "title": "Statut PQC des certificats TLS par endpoint",
+        "legend": { "visibility": "visible", "nested": false },
+        "data_source": {
+          "type": "data_view_spec",
+          "index_pattern": "asmira-exposure-current",
+          "time_field": "@timestamp"
+        },
+        "metrics": [
+          {
+            "operation": "count",
+            "empty_as_null": true,
+            "label": "Endpoints TLS"
+          }
+        ],
+        "group_by": [
+          {
+            "operation": "terms",
+            "fields": ["asmira.exposure.tls.certificate_pqc_status"],
+            "limit": 5,
+            "other_bucket": { "include_documents_without_field": false },
+            "rank_by": { "type": "metric", "metric_index": 0, "direction": "desc" },
+            "color": {
+              "mode": "categorical",
+              "palette": "default",
+              "mapping": [
+                { "values": ["pqc"], "color": { "type": "from_palette", "palette": "default", "index": 4 } },
+                { "values": ["hybrid"], "color": { "type": "from_palette", "palette": "default", "index": 0 } },
+                { "values": ["partial"], "color": { "type": "from_palette", "palette": "default", "index": 3 } },
+                { "values": ["classical"], "color": { "type": "from_palette", "palette": "default", "index": 6 } },
+                { "values": ["unknown"], "color": { "type": "from_palette", "palette": "default", "index": 5 } }
+              ]
+            }
+          }
+        ],
+        "styling": {
+          "donut_hole": "m",
+          "labels": { "visible": true, "position": "inside" },
+          "values": { "visible": true, "mode": "percentage" }
+        }
+      }
+    }
+  ]
+}

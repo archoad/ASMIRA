@@ -1,0 +1,20 @@
+{
+  "source": {
+    "index": ["logs-asmira.discovery-*"]
+  },
+  "latest": {
+    "unique_key": ["asmira.asset.id"],
+    "sort": "@timestamp"
+  },
+  "frequency": "5m",
+  "dest": {
+    "index": "asmira-discovery-latest"
+  },
+  "sync": {
+    "time": {
+      "field": "@timestamp",
+      "delay": "60s"
+    }
+  },
+  "description": "Dernière observation passive ou DNS par candidat Asmira"
+}

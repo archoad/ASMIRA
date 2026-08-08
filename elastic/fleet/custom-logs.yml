@@ -1,0 +1,55 @@
+# Référence à reproduire dans trois intégrations Custom Logs (Filestream)
+# rattachées à la policy de l’Elastic Agent de srv.
+#
+# L’identité Filestream est basée par défaut sur l’empreinte. Les fichiers
+# Asmira sont écrits atomiquement et leur première ligne contient un event.id
+# et un run.id uniques.
+
+inputs:
+  - name: Asmira discovery
+    dataset: asmira.discovery
+    namespace: default
+    paths:
+      - /var/lib/asmira/export/asmira_discovery_*.ndjson
+    parsers:
+      - ndjson:
+          target: ""
+          add_error_key: true
+          overwrite_keys: true
+    processors:
+      - fingerprint:
+          fields: ["event.id"]
+          target_field: "@metadata._id"
+          method: sha256
+
+  - name: Asmira exposure
+    dataset: asmira.exposure
+    namespace: default
+    paths:
+      - /var/lib/asmira/export/asmira_exposure_*.ndjson
+    parsers:
+      - ndjson:
+          target: ""
+          add_error_key: true
+          overwrite_keys: true
+    processors:
+      - fingerprint:
+          fields: ["event.id"]
+          target_field: "@metadata._id"
+          method: sha256
+
+  - name: Asmira run
+    dataset: asmira.run
+    namespace: default
+    paths:
+      - /var/lib/asmira/export/asmira_run_*.ndjson
+    parsers:
+      - ndjson:
+          target: ""
+          add_error_key: true
+          overwrite_keys: true
+    processors:
+      - fingerprint:
+          fields: ["event.id"]
+          target_field: "@metadata._id"
+          method: sha256
