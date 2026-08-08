@@ -29,9 +29,13 @@ install -d -o asmira -g asmira -m 0750 \
 	"$STATE_DIR/export" \
 	"$STATE_DIR/pictures"
 
-for sourceFile in asmira.py asmiraCommon.py fqdnCollect.py webTLS.py requirements.txt DEPLOYMENT.md; do
+for sourceFile in asmira.py asmiraCommon.py fqdnCollect.py webTLS.py requirements.txt; do
 	install -o root -g root -m 0644 "$SOURCE_DIR/$sourceFile" "$INSTALL_DIR/$sourceFile"
 done
+
+if [ -f "$SOURCE_DIR/DEPLOYMENT.md" ]; then
+	install -o root -g root -m 0644 "$SOURCE_DIR/DEPLOYMENT.md" "$INSTALL_DIR/DEPLOYMENT.md"
+fi
 
 install -d -o root -g root -m 0755 "$INSTALL_DIR/elastic"
 install -d -o root -g root -m 0755 \

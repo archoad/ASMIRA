@@ -9,7 +9,6 @@ charger des rapports d'exécution potentiellement sensibles.
 | Sujet | Fichier |
 | --- | --- |
 | Présentation et démarrage rapide | [`README.md`](README.md) |
-| Directives de contribution, sécurité et tests | [`AGENTS.md`](AGENTS.md) |
 | Signalement privé et données à ne pas publier | [`SECURITY.md`](SECURITY.md) |
 | Licence GNU GPL version 3 uniquement | [`LICENSE`](LICENSE) |
 | État confirmé, décisions et questions ouvertes | [`MEMORY.md`](MEMORY.md) |
@@ -17,7 +16,6 @@ charger des rapports d'exécution potentiellement sensibles.
 | Configuration, identifiants et écritures atomiques | [`asmiraCommon.py`](asmiraCommon.py) |
 | Découverte, normalisation et validation DNS | [`fqdnCollect.py`](fqdnCollect.py) |
 | Cartographie active HTTP/TLS et reporting | [`webTLS.py`](webTLS.py) |
-| Installation Debian, pilotes et exploitation | [`DEPLOYMENT.md`](DEPLOYMENT.md) |
 | Exemple de configuration | [`config/asmira.conf.example`](config/asmira.conf.example) |
 | Unités systemd | [`deploy/systemd/`](deploy/systemd/) |
 | Assets Elasticsearch, Fleet et Kibana | [`elastic/`](elastic/) |
@@ -43,8 +41,9 @@ sur `lab` présente l’état courant alimenté par des transforms `latest`.
 
 ## Ordre de lecture conseillé
 
-Pour une modification fonctionnelle, lire d'abord `MEMORY.md`, puis la section
-pertinente de `AGENTS.md` et uniquement le script et les tests concernés.
+Pour une modification fonctionnelle, lire d'abord `MEMORY.md`, puis uniquement
+le script et les tests concernés. Les procédures opérateur locales ne sont pas
+publiées dans le dépôt.
 
 Ne pas utiliser les rapports de `data/` ni les images de `pictures/` comme
 documentation de référence : ils peuvent être périmés et contenir un inventaire

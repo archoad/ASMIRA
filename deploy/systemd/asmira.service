@@ -1,6 +1,6 @@
 [Unit]
 Description=Asmira - cartographie de la surface d'exposition externe
-Documentation=file:///opt/asmira/DEPLOYMENT.md
+Documentation=https://github.com/archoad/ASMIRA#readme
 Wants=network-online.target
 After=network-online.target
 ConditionPathExists=/etc/asmira/asmira.conf

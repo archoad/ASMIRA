@@ -27,6 +27,15 @@ def testSystemdTimerRunsMondayEveningInParis():
 	assert 'Persistent=true' in timer
 
 
+def testDeploymentGuideIsOptionalAndSystemdUsesPublicDocumentation():
+	installScript = (BASE_DIR / 'deploy' / 'install.sh').read_text()
+	service = (BASE_DIR / 'deploy' / 'systemd' / 'asmira.service').read_text()
+
+	assert 'if [ -f "$SOURCE_DIR/DEPLOYMENT.md" ]; then' in installScript
+	assert 'Documentation=https://github.com/archoad/ASMIRA#readme' in service
+	assert 'Documentation=file:///opt/asmira/DEPLOYMENT.md' not in service
+
+
 def testElasticJsonAssetsAreValidAndDashboardIsGlobal():
 	jsonFiles = sorted((BASE_DIR / 'elastic').glob('**/*.json'))
 

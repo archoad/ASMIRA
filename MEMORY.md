@@ -153,6 +153,8 @@ confirmé fonctionnel le 3 août 2026 avec 100 endpoints.
   versionnés.
 - Le dépôt GitHub public est `archoad/ASMIRA`, sa branche principale est `main`,
   sa licence est `GPL-3.0-only` et aucune release GitHub n’est prévue.
+- `AGENTS.md` et `DEPLOYMENT.md` restent des documents locaux ignorés par Git ;
+  ils ne sont pas publiés dans le dépôt GitHub.
 - Les bases GeoIP, le GeoJSON local et les plages propres à l’opérateur ne sont
   pas versionnés. Les préfixes facultatifs sont lus depuis
   `ASMIRA_INTERNAL_NETWORKS` dans l’environnement protégé.
@@ -256,3 +258,7 @@ python3 -m pytest -q
   de la politique de sécurité et d’une CI de tests. Les données générées, bases
   GeoIP/GeoJSON et périmètres réseau réels sont exclus des commits, validés
   localement par Gitleaks avant publication.
+- **2026-08-08 :** `AGENTS.md` et `DEPLOYMENT.md` ont été retirés de l’index Git
+  et ajoutés aux exclusions. Le script d’installation tolère désormais
+  l’absence du guide opérateur local, et l’unité systemd renvoie vers le README
+  public.

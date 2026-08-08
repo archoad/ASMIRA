@@ -80,9 +80,10 @@ Cartographie active, uniquement sur des cibles autorisées :
 python3 webTLS.py --authorized-active-scan
 ```
 
-Pour le déploiement orchestré et l’intégration Elastic, consulter
-[`DEPLOYMENT.md`](DEPLOYMENT.md). Le projet est distribué depuis son code
-source ; aucune release GitHub n’est prévue.
+Les assets de déploiement orchestré et d’intégration Elastic sont fournis dans
+`deploy/` et `elastic/`. Les procédures opérateur propres à l’environnement de
+production restent locales et ne sont pas versionnées. Le projet est distribué
+depuis son code source ; aucune release GitHub n’est prévue.
 
 ## Licence
 

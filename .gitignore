@@ -7,6 +7,10 @@ htmlcov/
 .venv/
 venv/
 
+# Documentation locale et procédures opérateur
+/AGENTS.md
+/DEPLOYMENT.md
+
 data/*
 !data/app/
 data/app/*
