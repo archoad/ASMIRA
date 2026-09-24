@@ -4,8 +4,10 @@
 
 Asmira découvre et cartographie une surface d’exposition externe. Il agrège
 des observations passives, valide leur état DNS, construit un inventaire
-FQDN/IP puis analyse les services HTTP et TLS de chaque endpoint explicitement
-autorisé.
+de FQDN uniques puis analyse les services HTTP et TLS de chaque endpoint
+FQDN/IP explicitement autorisé. Les observations de toutes les adresses d’un
+même FQDN sont consolidées dans une seule entité courante, mise à jour à chaque
+run.
 
 ## Principes de sécurité
 
@@ -25,7 +27,8 @@ autorisé.
 
 - `fqdnCollect.py` : découverte multisource, normalisation et validation DNS ;
 - `webTLS.py` : cartographie FQDN/IP, HTTP, TLS, certificats et reporting ;
-- `asmira.py` : orchestration des runs de production et exports NDJSON ;
+- `asmira.py` : orchestration, consolidation unique par FQDN, détection des
+  changements et exports NDJSON ;
 - `asmiraCommon.py` : configuration, identifiants et écritures atomiques ;
 - `elastic/` : mappings, transforms, configuration Fleet et dashboard Kibana ;
 - `deploy/` : installation Debian et unités systemd.

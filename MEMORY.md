@@ -1,6 +1,6 @@
 # Mémoire du projet Asmira
 
-Dernière mise à jour : 2026-08-08
+Dernière mise à jour : 2026-08-09
 
 Ce document conserve uniquement l'état confirmé et les décisions durables du
 projet. Il ne doit contenir aucun secret, identifiant ni inventaire de cible.
@@ -23,8 +23,9 @@ Asmira couvre actuellement :
 - la conservation de la provenance des observations ;
 - la distinction entre noms explicites et observations wildcard ;
 - la validation DNS et la détection des zones wildcard ;
-- l'inventaire des hôtes résolus et de leurs adresses IPv4/IPv6 ;
-- l'analyse indépendante de chaque couple FQDN/IP ;
+- l'inventaire unique des FQDN et de leurs adresses IPv4/IPv6 ;
+- l'analyse indépendante de chaque couple FQDN/IP, puis sa consolidation en
+  une entité durable par FQDN ;
 - la cartographie des ports et des services HTTP/TLS ;
 - l'extraction des certificats et l'énumération des suites de chiffrement ;
 - la classification PQC des clés publiques et signatures de certificats X.509 ;
@@ -55,10 +56,11 @@ Une observation `*.example.com` reste un indice wildcard. Elle ne devient ni
 
 ### Cartographie
 
-`webTLS.py` consomme le fichier `hosts_list` daté et conserve chaque couple
-FQDN/IP. Il collecte les données DNS, ports, HTTP, TLS, certificats, chiffrements,
-WHOIS, GeoIP et Shodan disponibles, puis produit les rapports. Les captures
-d'écran et graphiques sont facultatifs.
+`webTLS.py` consomme le fichier `hosts_list` daté et analyse chaque couple
+FQDN/IP. Il collecte les données DNS, ports, HTTP, TLS, certificats,
+chiffrements, WHOIS, GeoIP et Shodan disponibles, puis produit les rapports.
+`asmira.py` regroupe ensuite toutes les observations IP d’un même nom dans un
+seul événement FQDN. Les captures d'écran et graphiques sont facultatifs.
 
 ### Exploitation installée
 
@@ -68,13 +70,15 @@ crée un `run-id` UTC, isole les rapports sous
 `/var/lib/asmira/runs/<run-id>/` et produit trois exports NDJSON atomiques sous
 `/var/lib/asmira/export/`.
 
-Dans les événements d’exposition, le couple analysé est représenté par
-`server.domain` et `server.ip`; `server.registered_domain` porte le domaine
-enregistré. Asmira n’utilise plus `host.name` pour la cible, car Elastic Agent
-réserve et enrichit `host.*` avec l’identité de la machine collectrice `srv`.
-La sonde reste identifiée par `observer.hostname`. `dns.question.*` est conservé
-pendant la transition et reste la représentation canonique des observations de
-découverte DNS.
+Dans les événements d’exposition, `server.domain` est la clé unique du FQDN et
+`asmira.asset.id` est calculé uniquement depuis ce FQDN normalisé. `server.ip`
+est multivalué et conserve toutes les adresses observées ; les observations
+FQDN/IP détaillées restent sous `asmira.raw.endpoints`.
+`server.registered_domain` porte le domaine enregistré. Asmira n’utilise plus
+`host.name` pour la cible, car Elastic Agent réserve et enrichit `host.*` avec
+l’identité de la machine collectrice `srv`. La sonde reste identifiée par
+`observer.hostname`. `dns.question.*` reste la représentation canonique des
+observations de découverte DNS.
 
 La cartographie active dispose d’une concurrence bornée par endpoint, d’un
 budget global de sous-processus et d’un checkpoint permettant de reprendre un
@@ -99,25 +103,48 @@ observer.
 
 Elastic Agent doit lire les datasets `asmira.discovery`, `asmira.exposure` et
 `asmira.run`. Les assets fournis créent les mappings, les data streams, les
-transforms `asmira-discovery-latest` et `asmira-exposure-latest`, les Data Views
-et le dashboard global. Les endpoints disparus produisent un tombstone
-`present=false`; l’alias `asmira-exposure-current` filtre les vues d’état
-courant, et le transform supprime les entités non rafraîchies après dix jours.
-Un run plafonné par `max_endpoints` ou comportant une source incomplète est
-marqué `partial` : il n’émet aucun tombstone et classe ses observations
-actuelles avec `change=observed`, afin de ne pas créer de disparitions
-artificielles.
+transforms `asmira-discovery-latest` et `asmira-fqdn-latest`, les Data Views et
+le dashboard global. Le transform FQDN est dédupliqué sur `server.domain` et ne
+porte aucune rétention temporelle : la base conserve durablement au plus un
+document par FQDN. Un FQDN absent d’un run complet produit un tombstone
+`present=false`, qui met à jour sa ligne sans la supprimer. L’alias
+`asmira-exposure-current` filtre les vues sur les FQDN présents ; l’alias
+`asmira-exposure-certificates-current` exige en plus une empreinte de
+certificat. Un run plafonné par `max_endpoints` ou comportant une source
+incomplète est marqué `partial` : il ajoute ou met à jour les FQDN observés mais
+n’émet aucun tombstone, afin de ne pas créer de disparitions artificielles.
 
 Les versions installées et confirmées d’Elasticsearch et Kibana sont `9.5.0`.
-Le dashboard provisionné contient deux contrôles épinglés dans cet ordre :
-**Domaine** sur `server.registered_domain`, puis **FQDN** sur `server.domain`.
-Cet ordre permet au choix du domaine de réduire les FQDN proposés.
+Le dashboard provisionné **[archoad] Asmira — Surface d’exposition globale**
+contient deux contrôles épinglés dans cet ordre : **Domaine** sur
+`server.registered_domain`, puis **FQDN** sur `server.domain`. Cet ordre permet
+au choix du domaine de réduire les FQDN proposés.
+
+Le dashboard décrit l’exposition comme le meilleur état connu, car un run
+partiel conserve les FQDN antérieurs. Il affiche séparément la santé du
+dernier run, construit le volume historique depuis
+`asmira.run.counts.fqdns`, et nomme la répartition des changements selon la
+période réellement sélectionnée. Les panneaux de découverte DNS utilisent
+`asmira-discovery-latest` et ignorent explicitement les contrôles d’exposition,
+dont les champs `server.*` n’existent pas dans les événements de découverte.
+Des panneaux Markdown précèdent chaque section majeure, les graphiques XY
+masquent leurs titres d’axes, et le panneau d’erreurs d’endpoints a été retiré
+au profit de la santé synthétique du run. À côté du statut PQC, le panneau
+**Suites cryptographiques TLS négociées** répartit
+`asmira.exposure.tls.negotiated_cipher`, c’est-à-dire la suite effectivement
+négociée lorsque la sonde a pu établir une session TLS.
 
 Les événements d’exposition indexent l’empreinte SHA-256 du certificat, les OID
 de sa clé publique et de sa signature, les algorithmes PQC reconnus et le statut
-`certificate_pqc_status`. Les valeurs possibles sont `pqc`, `hybrid`, `partial`,
-`classical` et `unknown`. Le dashboard courant présente leur répartition dans
-le donut **Statut PQC des certificats TLS par endpoint**. ML-DSA et SLH-DSA sont
+`certificate_pqc_status`. À chaque observation, l’orchestrateur compare les
+empreintes et statuts au dernier état connu. Il renseigne
+`certificate_changed`, `pqc_status_changed`, ainsi que les valeurs précédentes,
+et classe le FQDN `updated` lorsque son état matériel change. Le dashboard
+affiche ces transitions dans un tableau dédié.
+
+Les statuts possibles sont `pqc`, `hybrid`, `partial`, `classical` et `unknown`.
+Le dashboard courant présente leur répartition dans le donut **Statut PQC des
+certificats TLS par FQDN**. ML-DSA et SLH-DSA sont
 reconnus depuis leurs OID standardisés ; les OID composites ML-DSA/classiques
 restent distingués comme hybrides. Ce statut décrit le certificat X.509 et ne
 doit pas être interprété comme une preuve d’échange de clés TLS post-quantique.
@@ -170,6 +197,9 @@ confirmé fonctionnel le 3 août 2026 avec 100 endpoints.
 - Les cibles d’exposition utilisent `server.domain`,
   `server.registered_domain` et `server.ip`; les dashboards ne doivent pas
   utiliser `host.name` comme FQDN, car ce champ décrit la machine Elastic Agent.
+- La base entity-centric utilise `server.domain` comme clé unique durable. Les
+  runs ajoutent ou mettent à jour cette ligne ; ils ne créent pas une ligne par
+  adresse IP et la base ne comporte pas de rétention temporelle.
 - Les dépendances TLS Python validées en production sont
   `cryptography==46.0.7` et `pyOpenSSL==26.0.0`. Conserver leurs contraintes
   compatibles lors des futures mises à jour.
@@ -262,3 +292,21 @@ python3 -m pytest -q
   et ajoutés aux exclusions. Le script d’installation tolère désormais
   l’absence du guide opérateur local, et l’unité systemd renvoie vers le README
   public.
+- **2026-08-09 :** audit et correction du dashboard global. Le titre
+  `[archoad]` est aligné avec l’objet Kibana, l’état courant est décrit comme le
+  meilleur état connu lors des runs partiels, la santé du dernier run et la
+  découverte DNS sont rendues visibles, le volume historique repose sur les
+  compteurs de run et les changements sont qualifiés par la période affichée.
+  Le donut PQC utilise un alias filtré sur les endpoints possédant une empreinte
+  de certificat afin que son dénominateur corresponde aux certificats analysés.
+  Des explications Markdown structurent les sections, les titres d’axes XY sont
+  masqués, le panneau vide d’erreurs de cartographie est retiré et les suites
+  TLS effectivement négociées sont affichées à côté du statut PQC.
+- **2026-08-09 :** passage du modèle courant FQDN/IP au modèle entity-centric
+  FQDN. Les observations actives restent exécutées par adresse, mais
+  `asmira.py` les consolide en un événement unique par nom normalisé. Le
+  transform `asmira-fqdn-latest` est dédupliqué sur `server.domain` sans
+  rétention temporelle ; les tombstones conservent les FQDN absents avec
+  `present=false`. Les empreintes de certificat et statuts PQC sont comparés au
+  dernier état, avec conservation des valeurs précédentes et visualisation des
+  transitions dans Kibana.

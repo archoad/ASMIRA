@@ -107,8 +107,11 @@
                     "inventory": { "type": "integer" },
                     "resolvable_hosts": { "type": "integer" },
                     "endpoints": { "type": "integer" },
+                    "fqdns": { "type": "integer" },
                     "failed_endpoints": { "type": "integer" },
+                    "failed_fqdns": { "type": "integer" },
                     "disappeared_endpoints": { "type": "integer" },
+                    "disappeared_fqdns": { "type": "integer" },
                     "failed_sources": { "type": "integer" },
                     "skipped_sources": { "type": "integer" }
                   }
@@ -130,7 +133,10 @@
               "properties": {
                 "present": { "type": "boolean" },
                 "change": { "type": "keyword" },
+                "first_seen_at": { "type": "date" },
                 "last_seen_at": { "type": "date" },
+                "endpoint_count": { "type": "integer" },
+                "ip_count": { "type": "integer" },
                 "live": { "type": "keyword" },
                 "port": {
                   "properties": {
@@ -171,6 +177,10 @@
                     "certificate_signature_algorithm_oid": { "type": "keyword" },
                     "certificate_pqc_algorithms": { "type": "keyword" },
                     "certificate_pqc_status": { "type": "keyword" },
+                    "certificate_changed": { "type": "boolean" },
+                    "pqc_status_changed": { "type": "boolean" },
+                    "previous_certificate_sha256": { "type": "keyword" },
+                    "previous_certificate_pqc_status": { "type": "keyword" },
                     "certificate_not_after": { "type": "date" },
                     "certificate_days_remaining": { "type": "integer" },
                     "certificate_expired": { "type": "boolean" },

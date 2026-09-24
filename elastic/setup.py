@@ -134,16 +134,21 @@ def configureElasticsearch(client, retentionDays):
 		if existing and existing.get('status') == 404:
 			client.request('PUT', f'_data_stream/{dataStream}')
 	serverProperties = mappingAsset['template']['mappings']['properties']['server']['properties']
-	tlsProperties = (
+	exposureProperties = (
 		mappingAsset['template']['mappings']['properties']['asmira']['properties']
-		['exposure']['properties']['tls']['properties']
+		['exposure']['properties']
 	)
-	pqcFieldNames = (
+	tlsProperties = exposureProperties['tls']['properties']
+	tlsFieldNames = (
 		'certificate_sha256',
 		'certificate_public_key_algorithm_oid',
 		'certificate_signature_algorithm_oid',
 		'certificate_pqc_algorithms',
 		'certificate_pqc_status',
+		'certificate_changed',
+		'pqc_status_changed',
+		'previous_certificate_sha256',
+		'previous_certificate_pqc_status',
 	)
 	exposureMapping = {
 		'properties': {
@@ -157,10 +162,18 @@ def configureElasticsearch(client, retentionDays):
 				'properties': {
 					'exposure': {
 						'properties': {
+							fieldName: exposureProperties[fieldName]
+							for fieldName in (
+								'first_seen_at',
+								'last_seen_at',
+								'endpoint_count',
+								'ip_count',
+							)
+						} | {
 							'tls': {
 								'properties': {
 									fieldName: tlsProperties[fieldName]
-									for fieldName in pqcFieldNames
+									for fieldName in tlsFieldNames
 								},
 							},
 						},
@@ -174,6 +187,32 @@ def configureElasticsearch(client, retentionDays):
 		'logs-asmira.exposure-default/_mapping',
 		exposureMapping,
 	)
+	runCountProperties = (
+		mappingAsset['template']['mappings']['properties']['asmira']['properties']
+		['run']['properties']['counts']['properties']
+	)
+	client.request('PUT', 'logs-asmira.run-default/_mapping', {
+		'properties': {
+			'asmira': {
+				'properties': {
+					'run': {
+						'properties': {
+							'counts': {
+								'properties': {
+									fieldName: runCountProperties[fieldName]
+									for fieldName in (
+										'fqdns',
+										'failed_fqdns',
+										'disappeared_fqdns',
+									)
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	})
 	client.request('PUT', '_index_template/asmira-latest', {
 		'index_patterns': ['asmira-*-latest'],
 		'priority': 550,
@@ -183,16 +222,16 @@ def configureElasticsearch(client, retentionDays):
 			'managed_by': 'asmira',
 		},
 	})
-	exposureLatest = client.request(
+	fqdnLatest = client.request(
 		'GET',
-		'asmira-exposure-latest',
+		'asmira-fqdn-latest',
 		allowedStatuses=(404,),
 	)
-	if exposureLatest and exposureLatest.get('status') == 404:
-		client.request('PUT', 'asmira-exposure-latest')
+	if fqdnLatest and fqdnLatest.get('status') == 404:
+		client.request('PUT', 'asmira-fqdn-latest')
 	client.request(
 		'PUT',
-		'asmira-exposure-latest/_mapping',
+		'asmira-fqdn-latest/_mapping',
 		exposureMapping,
 	)
 	discoveryLatest = client.request(
@@ -204,28 +243,74 @@ def configureElasticsearch(client, retentionDays):
 		client.request('PUT', 'asmira-discovery-latest')
 	ensureTransform(
 		client,
-		'asmira-exposure-latest',
-		loadJson('elasticsearch/asmira-exposure-latest-transform.json'),
+		'asmira-fqdn-latest',
+		loadJson('elasticsearch/asmira-fqdn-latest-transform.json'),
 	)
 	ensureTransform(
 		client,
 		'asmira-discovery-latest',
 		loadJson('elasticsearch/asmira-discovery-latest-transform.json'),
 	)
-	client.request('POST', '_aliases', {
-		'actions': [{
+	legacyTransform = client.request(
+		'GET',
+		'_transform/asmira-exposure-latest',
+		allowedStatuses=(404,),
+	)
+	if not (legacyTransform and legacyTransform.get('status') == 404):
+		client.request(
+			'POST',
+			'_transform/asmira-exposure-latest/_stop',
+			allowedStatuses=(409,),
+		)
+	aliasActions = []
+	for aliasName in (
+		'asmira-exposure-current',
+		'asmira-exposure-certificates-current',
+	):
+		existingAliases = client.request(
+			'GET',
+			f'_alias/{aliasName}',
+			allowedStatuses=(404,),
+		)
+		if existingAliases and existingAliases.get('status') != 404:
+			aliasActions.extend({
+				'remove': {
+					'index': indexName,
+					'alias': aliasName,
+				},
+			} for indexName in existingAliases if indexName != 'asmira-fqdn-latest')
+	aliasActions.extend([{
 			'add': {
-				'index': 'asmira-exposure-latest',
+				'index': 'asmira-fqdn-latest',
 				'alias': 'asmira-exposure-current',
 				'filter': {'term': {'asmira.exposure.present': True}},
 			},
-		}],
-	})
+		}, {
+			'add': {
+				'index': 'asmira-fqdn-latest',
+				'alias': 'asmira-exposure-certificates-current',
+				'filter': {
+					'bool': {
+						'filter': [
+							{'term': {'asmira.exposure.present': True}},
+							{'exists': {
+								'field': 'asmira.exposure.tls.certificate_sha256',
+							}},
+						],
+					},
+				},
+			},
+		}])
+	client.request('POST', '_aliases', {'actions': aliasActions})
 
 
 def configureKibana(client):
 	dataViews = (
-		('asmira-exposure-current', 'Asmira — Exposition actuelle'),
+		('asmira-exposure-current', 'Asmira — FQDN actuels'),
+		(
+			'asmira-exposure-certificates-current',
+			'Asmira — Certificats actuels',
+		),
 		('asmira-discovery-latest', 'Asmira — Découverte actuelle'),
 		('logs-asmira.*-*', 'Asmira — Historique'),
 	)

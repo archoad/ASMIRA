@@ -31,13 +31,17 @@ charger des rapports d'exécution potentiellement sensibles.
    `hosts_inventory` et `hosts_list` dans `data/`.
 4. `webTLS.py` consomme `hosts_list` et analyse séparément chaque couple
    FQDN/IP autorisé.
-5. Les rapports JSON/XLSX sont écrits dans `data/`; les captures et graphiques
+5. `asmira.py` consolide toutes les observations FQDN/IP d’un même nom en une
+   seule entité FQDN, compare son certificat et son statut PQC au dernier état
+   connu, puis produit les exports NDJSON.
+6. Les rapports JSON/XLSX sont écrits dans `data/`; les captures et graphiques
    facultatifs sont écrits dans `pictures/`.
 
 En production, `asmira.py` isole chaque exécution sous un `run-id`, produit des
 exports NDJSON atomiques et conserve un checkpoint de la cartographie active.
 Elastic Agent sur `srv` lit les exports, Elasticsearch les historise et Kibana
-sur `lab` présente l’état courant alimenté par des transforms `latest`.
+sur `lab` présente une base durable contenant au plus un document par FQDN,
+alimentée par le transform `asmira-fqdn-latest`.
 
 ## Ordre de lecture conseillé
 

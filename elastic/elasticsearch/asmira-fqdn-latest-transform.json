@@ -1,0 +1,20 @@
+{
+  "source": {
+    "index": ["logs-asmira.exposure-*"]
+  },
+  "latest": {
+    "unique_key": ["server.domain"],
+    "sort": "@timestamp"
+  },
+  "frequency": "5m",
+  "dest": {
+    "index": "asmira-fqdn-latest"
+  },
+  "sync": {
+    "time": {
+      "field": "@timestamp",
+      "delay": "60s"
+    }
+  },
+  "description": "Dernier état durable et unique par FQDN Asmira"
+}

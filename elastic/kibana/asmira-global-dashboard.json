@@ -1,6 +1,6 @@
 {
-  "title": "Asmira — Surface d’exposition globale",
-  "description": "Inventaire courant, exposition HTTP/TLS, santé des scans et historique hebdomadaire Asmira.",
+  "title": "[archoad] Asmira — Surface d’exposition globale",
+  "description": "Base courante unique par FQDN, changements de certificats et de conformité PQC, santé du dernier run, historique et découverte DNS Asmira. Les observations par IP sont agrégées dans leur FQDN.",
   "time_range": {
     "from": "now-90d",
     "to": "now"
@@ -49,27 +49,16 @@
   ],
   "panels": [
     {
-      "grid": { "x": 0, "y": 0, "w": 12, "h": 5 },
-      "type": "vis",
+      "grid": { "x": 0, "y": 0, "w": 48, "h": 2 },
+      "type": "markdown",
       "config": {
-        "type": "metric",
-        "data_source": {
-          "type": "data_view_spec",
-          "index_pattern": "asmira-exposure-current",
-          "time_field": "@timestamp"
-        },
-        "metrics": [
-          {
-            "type": "primary",
-            "operation": "unique_count",
-            "field": "server.domain",
-            "label": "FQDN exposés"
-          }
-        ]
+        "content": "### Vue d’ensemble",
+        "hide_border": true,
+        "settings": { "open_links_in_new_tab": true }
       }
     },
     {
-      "grid": { "x": 12, "y": 0, "w": 12, "h": 5 },
+      "grid": { "x": 0, "y": 2, "w": 14, "h": 5 },
       "type": "vis",
       "config": {
         "type": "metric",
@@ -82,13 +71,13 @@
           {
             "type": "primary",
             "operation": "count",
-            "label": "Endpoints FQDN/IP"
+            "label": "FQDN uniques"
           }
         ]
       }
     },
     {
-      "grid": { "x": 24, "y": 0, "w": 12, "h": 5 },
+      "grid": { "x": 17, "y": 2, "w": 14, "h": 5 },
       "type": "vis",
       "config": {
         "type": "metric",
@@ -102,33 +91,42 @@
             "type": "primary",
             "operation": "unique_count",
             "field": "server.ip",
-            "label": "IP uniques"
+            "label": "Adresses IP associées"
           }
         ]
       }
     },
     {
-      "grid": { "x": 36, "y": 0, "w": 12, "h": 5 },
+      "grid": { "x": 34, "y": 2, "w": 14, "h": 5 },
       "type": "vis",
       "config": {
         "type": "metric",
         "data_source": {
           "type": "data_view_spec",
-          "index_pattern": "logs-asmira.run-*",
+          "index_pattern": "asmira-exposure-current",
           "time_field": "@timestamp"
         },
         "metrics": [
           {
             "type": "primary",
-            "operation": "max",
-            "field": "asmira.run.duration_seconds",
-            "label": "Durée maximale sur la période (s)"
+            "operation": "unique_count",
+            "field": "server.registered_domain",
+            "label": "Domaines enregistrés couverts"
           }
         ]
       }
     },
     {
-      "grid": { "x": 0, "y": 5, "w": 16, "h": 10 },
+      "grid": { "x": 0, "y": 7, "w": 48, "h": 2 },
+      "type": "markdown",
+      "config": {
+        "content": "### Exposition HTTP et TLS",
+        "hide_border": true,
+        "settings": { "open_links_in_new_tab": true }
+      }
+    },
+    {
+      "grid": { "x": 0, "y": 9, "w": 16, "h": 10 },
       "type": "vis",
       "config": {
         "type": "pie",
@@ -149,7 +147,7 @@
       }
     },
     {
-      "grid": { "x": 16, "y": 5, "w": 16, "h": 10 },
+      "grid": { "x": 16, "y": 9, "w": 16, "h": 10 },
       "type": "vis",
       "config": {
         "type": "pie",
@@ -170,11 +168,11 @@
       }
     },
     {
-      "grid": { "x": 32, "y": 5, "w": 16, "h": 10 },
+      "grid": { "x": 32, "y": 9, "w": 16, "h": 10 },
       "type": "vis",
       "config": {
         "type": "pie",
-        "title": "État des analyses",
+        "title": "État des scans d’endpoints",
         "data_source": {
           "type": "data_view_spec",
           "index_pattern": "asmira-exposure-current",
@@ -191,11 +189,24 @@
       }
     },
     {
-      "grid": { "x": 0, "y": 15, "w": 24, "h": 10 },
+      "grid": { "x": 0, "y": 19, "w": 48, "h": 2 },
+      "type": "markdown",
+      "config": {
+        "content": "### Répartition de la base FQDN",
+        "hide_border": true,
+        "settings": { "open_links_in_new_tab": true }
+      }
+    },
+    {
+      "grid": { "x": 0, "y": 21, "w": 24, "h": 10 },
       "type": "vis",
       "config": {
         "type": "xy",
-        "title": "Endpoints par domaine",
+        "title": "FQDN par domaine",
+        "axis": {
+          "x": { "title": { "visible": false } },
+          "y": { "title": { "visible": false } }
+        },
         "layers": [
           {
             "type": "bar_stacked",
@@ -215,11 +226,15 @@
       }
     },
     {
-      "grid": { "x": 24, "y": 15, "w": 24, "h": 10 },
+      "grid": { "x": 24, "y": 21, "w": 24, "h": 10 },
       "type": "vis",
       "config": {
         "type": "xy",
-        "title": "Endpoints par ASN",
+        "title": "FQDN par ASN observé",
+        "axis": {
+          "x": { "title": { "visible": false } },
+          "y": { "title": { "visible": false } }
+        },
         "layers": [
           {
             "type": "bar_stacked",
@@ -239,39 +254,19 @@
       }
     },
     {
-      "grid": { "x": 0, "y": 25, "w": 24, "h": 10 },
+      "grid": { "x": 0, "y": 31, "w": 24, "h": 10 },
       "type": "vis",
       "config": {
         "type": "xy",
-        "title": "Volume historique d’endpoints",
+        "title": "FQDN observés par exécution",
+        "axis": {
+          "x": { "title": { "visible": false } },
+          "y": { "title": { "visible": false } }
+        },
         "layers": [
           {
             "type": "line",
-            "data_source": {
-              "type": "data_view_spec",
-              "index_pattern": "logs-asmira.exposure-*",
-              "time_field": "@timestamp"
-            },
-            "x": { "operation": "date_histogram", "field": "@timestamp" },
-            "y": [{ "operation": "count" }],
-            "breakdown_by": {
-              "operation": "terms",
-              "fields": ["dns.question.registered_domain"],
-              "limit": 9
-            }
-          }
-        ]
-      }
-    },
-    {
-      "grid": { "x": 24, "y": 25, "w": 24, "h": 10 },
-      "type": "vis",
-      "config": {
-        "type": "xy",
-        "title": "Durée des cycles hebdomadaires",
-        "layers": [
-          {
-            "type": "line",
+            "ignore_global_filters": true,
             "data_source": {
               "type": "data_view_spec",
               "index_pattern": "logs-asmira.run-*",
@@ -281,8 +276,8 @@
             "y": [
               {
                 "operation": "max",
-                "field": "asmira.run.duration_seconds",
-                "label": "Durée (s)"
+                "field": "asmira.run.counts.fqdns",
+                "label": "FQDN observés"
               }
             ],
             "breakdown_by": {
@@ -295,7 +290,16 @@
       }
     },
     {
-      "grid": { "x": 0, "y": 35, "w": 48, "h": 15 },
+      "grid": { "x": 0, "y": 41, "w": 48, "h": 3 },
+      "type": "markdown",
+      "config": {
+        "content": "### Certificats à surveiller\nLa table retient les certificats expirés ou arrivant à échéance dans les 30 jours. Une ligne correspond à un FQDN unique et peut contenir plusieurs IP ou plusieurs certificats observés.",
+        "hide_border": true,
+        "settings": { "open_links_in_new_tab": true }
+      }
+    },
+    {
+      "grid": { "x": 0, "y": 44, "w": 48, "h": 15 },
       "type": "vis",
       "config": {
         "type": "data_table",
@@ -318,29 +322,16 @@
       }
     },
     {
-      "grid": { "x": 0, "y": 50, "w": 48, "h": 15 },
-      "type": "vis",
+      "grid": { "x": 0, "y": 59, "w": 48, "h": 3 },
+      "type": "markdown",
       "config": {
-        "type": "data_table",
-        "title": "Erreurs récentes de cartographie",
-        "data_source": {
-          "type": "esql",
-          "query": "FROM asmira-exposure-current | WHERE asmira.exposure.scan.status == \"failed\" | KEEP @timestamp, server.domain, server.ip, server.registered_domain, asmira.exposure.scan.duration_seconds, asmira.exposure.scan.error | SORT @timestamp DESC | LIMIT 200"
-        },
-        "rows": [
-          { "column": "@timestamp" },
-          { "column": "server.domain" },
-          { "column": "server.ip" },
-          { "column": "server.registered_domain" },
-          { "column": "asmira.exposure.scan.error" }
-        ],
-        "metrics": [
-          { "column": "asmira.exposure.scan.duration_seconds" }
-        ]
+        "content": "### Qualité TLS et évolution\nLes deux premiers panneaux qualifient les certificats observés. Les changements sont agrégés sur toute la période sélectionnée et peuvent inclure plusieurs runs.",
+        "hide_border": true,
+        "settings": { "open_links_in_new_tab": true }
       }
     },
     {
-      "grid": { "x": 0, "y": 65, "w": 16, "h": 10 },
+      "grid": { "x": 0, "y": 62, "w": 16, "h": 10 },
       "type": "vis",
       "config": {
         "type": "pie",
@@ -361,7 +352,7 @@
       }
     },
     {
-      "grid": { "x": 16, "y": 65, "w": 16, "h": 10 },
+      "grid": { "x": 16, "y": 62, "w": 16, "h": 10 },
       "type": "vis",
       "config": {
         "type": "pie",
@@ -382,11 +373,11 @@
       }
     },
     {
-      "grid": { "x": 32, "y": 65, "w": 16, "h": 10 },
+      "grid": { "x": 32, "y": 62, "w": 16, "h": 10 },
       "type": "vis",
       "config": {
         "type": "pie",
-        "title": "Changements du dernier cycle",
+        "title": "Changements observés sur la période",
         "data_source": {
           "type": "data_view_spec",
           "index_pattern": "logs-asmira.exposure-*",
@@ -397,28 +388,37 @@
           {
             "operation": "terms",
             "fields": ["asmira.exposure.change"],
-            "limit": 3
+            "limit": 5
           }
         ]
       }
     },
     {
-      "grid": { "x": 0, "y": 75, "w": 48, "h": 10 },
+      "grid": { "x": 0, "y": 72, "w": 48, "h": 3 },
+      "type": "markdown",
+      "config": {
+        "content": "### Cryptographie observée\nLe statut PQC qualifie uniquement la clé publique et la signature du certificat X.509 ; il ne prouve pas un échange de clés post-quantique. Le panneau voisin montre la suite TLS négociée et la table suivante conserve les changements de certificat ou de statut PQC détectés entre deux observations du même FQDN.",
+        "hide_border": true,
+        "settings": { "open_links_in_new_tab": true }
+      }
+    },
+    {
+      "grid": { "x": 0, "y": 75, "w": 24, "h": 10 },
       "type": "vis",
       "config": {
         "type": "pie",
-        "title": "Statut PQC des certificats TLS par endpoint",
+        "title": "Statut PQC des certificats TLS par FQDN",
         "legend": { "visibility": "visible", "nested": false },
         "data_source": {
           "type": "data_view_spec",
-          "index_pattern": "asmira-exposure-current",
+          "index_pattern": "asmira-exposure-certificates-current",
           "time_field": "@timestamp"
         },
         "metrics": [
           {
             "operation": "count",
             "empty_as_null": true,
-            "label": "Endpoints TLS"
+            "label": "FQDN avec certificat"
           }
         ],
         "group_by": [
@@ -426,7 +426,7 @@
             "operation": "terms",
             "fields": ["asmira.exposure.tls.certificate_pqc_status"],
             "limit": 5,
-            "other_bucket": { "include_documents_without_field": false },
+            "other_bucket": { "include_documents_without_field": true },
             "rank_by": { "type": "metric", "metric_index": 0, "direction": "desc" },
             "color": {
               "mode": "categorical",
@@ -446,6 +446,223 @@
           "labels": { "visible": true, "position": "inside" },
           "values": { "visible": true, "mode": "percentage" }
         }
+      }
+    },
+    {
+      "grid": { "x": 24, "y": 75, "w": 24, "h": 10 },
+      "type": "vis",
+      "config": {
+        "type": "pie",
+        "title": "Suites cryptographiques TLS négociées",
+        "legend": { "visibility": "visible", "nested": false },
+        "data_source": {
+          "type": "data_view_spec",
+          "index_pattern": "asmira-exposure-current",
+          "time_field": "@timestamp"
+        },
+        "metrics": [
+          {
+            "operation": "count",
+            "empty_as_null": true,
+            "label": "FQDN avec négociation TLS"
+          }
+        ],
+        "group_by": [
+          {
+            "operation": "terms",
+            "fields": ["asmira.exposure.tls.negotiated_cipher"],
+            "limit": 15,
+            "other_bucket": { "include_documents_without_field": false }
+          }
+        ],
+        "styling": {
+          "donut_hole": "m",
+          "labels": { "visible": true, "position": "inside" },
+          "values": { "visible": true, "mode": "percentage" }
+        }
+      }
+    },
+    {
+      "grid": { "x": 0, "y": 85, "w": 48, "h": 15 },
+      "type": "vis",
+      "config": {
+        "type": "data_table",
+        "title": "Changements récents de certificat ou de statut PQC",
+        "data_source": {
+          "type": "esql",
+          "query": "FROM logs-asmira.exposure-* | WHERE asmira.exposure.tls.certificate_changed == true OR asmira.exposure.tls.pqc_status_changed == true | KEEP @timestamp, server.domain, server.ip, server.registered_domain, asmira.exposure.tls.previous_certificate_sha256, asmira.exposure.tls.certificate_sha256, asmira.exposure.tls.previous_certificate_pqc_status, asmira.exposure.tls.certificate_pqc_status | SORT @timestamp DESC | LIMIT 200"
+        },
+        "rows": [
+          { "column": "@timestamp" },
+          { "column": "server.domain" },
+          { "column": "server.ip" },
+          { "column": "server.registered_domain" },
+          { "column": "asmira.exposure.tls.previous_certificate_sha256" },
+          { "column": "asmira.exposure.tls.certificate_sha256" },
+      { "column": "asmira.exposure.tls.previous_certificate_pqc_status" }
+    ],
+    "metrics": [
+      { "column": "asmira.exposure.tls.certificate_pqc_status" }
+    ]
+      }
+    },
+    {
+      "grid": { "x": 0, "y": 100, "w": 48, "h": 3 },
+      "type": "markdown",
+      "config": {
+        "content": "### Santé du pipeline\nCette ligne décrit uniquement le run le plus récent. Le statut `partial` signale une couverture incomplète : les observations antérieures sont alors conservées et aucune disparition n’est déduite.",
+        "hide_border": true,
+        "settings": { "open_links_in_new_tab": true }
+      }
+    },
+    {
+      "grid": { "x": 0, "y": 103, "w": 48, "h": 10 },
+      "type": "vis",
+      "config": {
+        "type": "data_table",
+        "title": "Santé du dernier run",
+        "ignore_global_filters": true,
+        "data_source": {
+          "type": "esql",
+          "query": "FROM logs-asmira.run-* | SORT @timestamp DESC | KEEP @timestamp, asmira.run.id, asmira.run.status, asmira.run.partial, asmira.run.duration_seconds, asmira.run.counts.fqdns, asmira.run.counts.resolvable_hosts, asmira.run.counts.failed_sources | LIMIT 1"
+        },
+        "rows": [
+          { "column": "@timestamp" },
+          { "column": "asmira.run.id" },
+          { "column": "asmira.run.status" },
+          { "column": "asmira.run.partial" }
+        ],
+        "metrics": [
+          { "column": "asmira.run.duration_seconds" },
+          { "column": "asmira.run.counts.fqdns" },
+          { "column": "asmira.run.counts.resolvable_hosts" },
+          { "column": "asmira.run.counts.failed_sources" }
+        ]
+      }
+    },
+    {
+      "grid": { "x": 0, "y": 113, "w": 48, "h": 3 },
+      "type": "markdown",
+      "config": {
+        "content": "### Découverte DNS\nCes panneaux couvrent tous les candidats connus et ignorent volontairement les filtres d’exposition `server.*`. Un motif wildcard reste un indice de certificat ou de source passive et n’est jamais transformé en hôte concret.",
+        "hide_border": true,
+        "settings": { "open_links_in_new_tab": true }
+      }
+    },
+    {
+      "grid": { "x": 0, "y": 116, "w": 12, "h": 10 },
+      "type": "vis",
+      "config": {
+        "type": "metric",
+        "ignore_global_filters": true,
+        "data_source": {
+          "type": "data_view_spec",
+          "index_pattern": "asmira-discovery-latest",
+          "time_field": "@timestamp"
+        },
+        "metrics": [
+          {
+            "type": "primary",
+            "operation": "unique_count",
+            "field": "asmira.asset.id",
+            "label": "Candidats DNS connus"
+          }
+        ]
+      }
+    },
+    {
+      "grid": { "x": 12, "y": 116, "w": 12, "h": 10 },
+      "type": "vis",
+      "config": {
+        "type": "pie",
+        "title": "État DNS des candidats",
+        "ignore_global_filters": true,
+        "data_source": {
+          "type": "data_view_spec",
+          "index_pattern": "asmira-discovery-latest",
+          "time_field": "@timestamp"
+        },
+        "metrics": [{ "operation": "count" }],
+        "group_by": [
+          {
+            "operation": "terms",
+            "fields": ["asmira.discovery.dns_status"],
+            "limit": 10
+          }
+        ]
+      }
+    },
+    {
+      "grid": { "x": 24, "y": 116, "w": 12, "h": 10 },
+      "type": "vis",
+      "config": {
+        "type": "pie",
+        "title": "Résolution DNS des candidats",
+        "ignore_global_filters": true,
+        "data_source": {
+          "type": "data_view_spec",
+          "index_pattern": "asmira-discovery-latest",
+          "time_field": "@timestamp"
+        },
+        "metrics": [{ "operation": "count" }],
+        "group_by": [
+          {
+            "operation": "terms",
+            "fields": ["asmira.discovery.resolvable"],
+            "limit": 3
+          }
+        ]
+      }
+    },
+    {
+      "grid": { "x": 36, "y": 116, "w": 12, "h": 10 },
+      "type": "vis",
+      "config": {
+        "type": "pie",
+        "title": "Motifs wildcard conservés",
+        "ignore_global_filters": true,
+        "data_source": {
+          "type": "data_view_spec",
+          "index_pattern": "asmira-discovery-latest",
+          "time_field": "@timestamp"
+        },
+        "metrics": [{ "operation": "count" }],
+        "group_by": [
+          {
+            "operation": "terms",
+            "fields": ["asmira.discovery.wildcard_pattern"],
+            "limit": 3
+          }
+        ]
+      }
+    },
+    {
+      "grid": { "x": 0, "y": 126, "w": 48, "h": 10 },
+      "type": "vis",
+      "config": {
+        "type": "xy",
+        "title": "Sources des candidats",
+        "axis": {
+          "x": { "title": { "visible": false } },
+          "y": { "title": { "visible": false } }
+        },
+        "layers": [
+          {
+            "type": "bar_stacked",
+            "ignore_global_filters": true,
+            "data_source": {
+              "type": "data_view_spec",
+              "index_pattern": "asmira-discovery-latest",
+              "time_field": "@timestamp"
+            },
+            "x": {
+              "operation": "terms",
+              "fields": ["asmira.discovery.sources"],
+              "limit": 20
+            },
+            "y": [{ "operation": "count" }]
+          }
+        ]
       }
     }
   ]
