@@ -773,3 +773,63 @@ def testHostCartographyWritesThreeOutputsAndWebTlsSchema(tmp_path):
 
 def testMainRejectsInvalidWorkerCount():
 	assert fqdnCollect.main(['--dns-workers', '0']) == 2
+
+
+class CaaResolver:
+	def __init__(self, records, failing=()):
+		self.records = records
+		self.failing = set(failing)
+		self.queries = []
+
+	def resolve(self, name, recordType, raise_on_no_answer=True):
+		self.queries.append((name, recordType))
+		if name in self.failing:
+			raise dns.exception.Timeout()
+		values = self.records.get(name)
+		if values is None:
+			raise dns.resolver.NXDOMAIN()
+		rrset = [
+			SimpleNamespace(flags=0, tag=tag.encode(), value=value.encode())
+			for tag, value in values
+		]
+		return(SimpleNamespace(rrset=rrset))
+
+
+def testEffectiveCaaClimbsToFirstParentWithRecords():
+	resolver = CaaResolver({
+		'api.shop.example.com': [],
+		'shop.example.com': [('issue', 'letsencrypt.org'), ('iodef', 'mailto:pki@example.com')],
+		'example.com': [('issue', 'digicert.com')],
+	})
+	validator = fqdnCollect.DnsValidator(resolver=resolver)
+
+	result = validator.effectiveCaa('api.shop.example.com', 'example.com')
+
+	assert result['status'] == 'present'
+	assert result['source'] == 'shop.example.com'
+	assert {record['tag'] for record in result['records']} == {'issue', 'iodef'}
+
+
+def testEffectiveCaaIsAbsentWhenNoLevelPublishesOne():
+	validator = fqdnCollect.DnsValidator(resolver=CaaResolver({'www.example.com': [], 'example.com': []}))
+
+	assert validator.effectiveCaa('www.example.com', 'example.com') == {
+		'status': 'absent', 'source': None, 'records': [],
+	}
+
+
+def testEffectiveCaaReportsDnsErrorsInsteadOfAbsence():
+	resolver = CaaResolver({'example.com': [('issue', 'letsencrypt.org')]}, failing={'www.example.com'})
+	validator = fqdnCollect.DnsValidator(resolver=resolver)
+
+	assert validator.effectiveCaa('www.example.com', 'example.com')['status'] == 'error'
+
+
+def testCaaLookupsAreCachedAcrossHosts():
+	resolver = CaaResolver({'a.example.com': [], 'b.example.com': [], 'example.com': [('issue', 'pki.goog')]})
+	validator = fqdnCollect.DnsValidator(resolver=resolver)
+
+	validator.effectiveCaa('a.example.com', 'example.com')
+	validator.effectiveCaa('b.example.com', 'example.com')
+
+	assert resolver.queries.count(('example.com', 'CAA')) == 1

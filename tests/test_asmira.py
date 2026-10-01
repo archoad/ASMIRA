@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 import asmira
+import asmiraGrade
 import asmiraCommon
 import webTLS
 
@@ -226,6 +227,220 @@ def testExposureEventsAggregateEndpointsAndDetectCertificateChangesPerFqdn():
 	assert tls['pqc_status_changed'] is True
 	assert tls['previous_certificate_pqc_status'] == ['classical']
 	assert len(event['asmira']['raw']['endpoints']) == 2
+
+
+def gradedItem(**overrides):
+	item = {
+		'host': 'www.example.com',
+		'ip': '192.0.2.10',
+		'domain_name': 'example.com',
+		'port443': 'open',
+		'TLSv1.3': ['TLS_AKE_WITH_AES_256_GCM_SHA384'],
+		'TLSv1.2': ['TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384'],
+		'certificate_sha256': 'a' * 64,
+		'public_key': 'RSAPublicKey',
+		'key_size': 2048,
+		'signature_hash': 'sha256',
+		'chain_valid': True,
+		'verify_message': 'ok',
+		'not_before': '01-07-2026',
+		'not_after': '29-09-2026',
+		'remain': 60,
+		'has_expired': False,
+		'scan_status': 'success',
+		'observed_at': '2026-07-31T20:00:00+00:00',
+	}
+	item.update(overrides)
+	return(item)
+
+
+def testExposureEventsCarryGradeAndCertificateDetails():
+	event = asmira.buildExposureEvents([gradedItem()], '20260731T200000Z-12345678')[0]
+	tls = event['asmira']['exposure']['tls']
+
+	assert tls['grade'] == 'A'
+	assert tls['grade_version'] == asmiraGrade.GRADE_VERSION
+	assert tls['findings'] == ['HSTS_MISSING']
+	assert tls['certificate_lifetime_days'] == [90]
+	assert tls['certificate_not_before'] == ['2026-07-01']
+	assert tls['certificate_key_size'] == [2048]
+	assert tls['grade_changed'] is False
+
+
+def testExposureEventsDetectGradeChange():
+	runId = '20260801T200000Z-12345678'
+	previous = asmira.buildExposureEvents(
+		[gradedItem(**{'TLSv1.0': ['TLS_RSA_WITH_3DES_EDE_CBC_SHA']})],
+		'20260731T200000Z-12345678',
+	)
+
+	event = asmira.buildExposureEvents([gradedItem()], runId, previousEvents=previous)[0]
+	tls = event['asmira']['exposure']['tls']
+
+	assert event['asmira']['exposure']['change'] == 'updated'
+	assert tls['grade_changed'] is True
+	assert tls['previous_grade'] == 'C'
+	assert tls['grade'] == 'A'
+
+
+def testExposureEventsWithoutHttpsHaveNoGrade():
+	event = asmira.buildExposureEvents(
+		[gradedItem(port443='filtered', certificate_sha256=None)],
+		'20260731T200000Z-12345678',
+	)[0]
+
+	assert 'grade' not in event['asmira']['exposure']['tls']
+
+
+def caaResult(*records, source='example.com'):
+	return({
+		'status': 'present',
+		'source': source,
+		'records': [{'flags': 0, 'tag': tag, 'value': value} for tag, value in records],
+	})
+
+
+def testCaaFieldsNameAuthoritiesAndAcme():
+	fields = asmira.caaFields(caaResult(
+		('issue', 'letsencrypt.org; validationmethods=dns-01'),
+		('issue', 'ca.example.net'),
+		('issuewild', ';'),
+		('iodef', 'mailto:pki@example.com'),
+	))
+
+	assert fields['issue'] == ['ca.example.net', 'letsencrypt.org']
+	assert fields['authorized_ca'] == ["Let's Encrypt", 'ca.example.net']
+	assert fields['issuewild'] == [asmira.CAA_DENY_ALL]
+	assert fields['acme_available'] is True
+	assert fields['acme_parameters'] is True
+	assert fields['deny_all'] is False
+
+
+def testCaaFieldsWithoutRecordsAndDenyAll():
+	assert asmira.caaFields({'status': 'absent', 'source': None, 'records': []})['authorized_ca'] == []
+	denied = asmira.caaFields(caaResult(('issue', ';')))
+	assert denied['deny_all'] is True
+	assert denied['acme_available'] is None
+	assert asmira.caaFields(None) is None
+
+
+@pytest.mark.parametrize('issuers, expected', [
+	(['GlobalSign nv-sa'], True),
+	(['COMODO CA Limited'], True),
+	(['DigiCert Inc'], False),
+	([], None),
+])
+def testIssuerAuthorizedByCaa(issuers, expected):
+	caa = asmira.caaFields(caaResult(('issue', 'globalsign.com'), ('issue', 'sectigo.com')))
+
+	assert asmira.issuerAuthorizedByCaa(caa, issuers) is expected
+
+
+def testExposureEventsCarryCaaAndFlagUnauthorizedIssuer():
+	items = asmira.attachDnsContext(
+		[gradedItem(issuer_organization='DigiCert Inc')],
+		[{'name': 'www.example.com', 'caa': caaResult(('issue', 'letsencrypt.org'))}],
+	)
+
+	event = asmira.buildExposureEvents(items, '20260731T200000Z-12345678')[0]
+	exposure = event['asmira']['exposure']
+
+	assert exposure['dns']['caa']['authorized_ca'] == ["Let's Encrypt"]
+	assert exposure['tls']['certificate_issuer_authorized'] is False
+	assert 'CAA_ISSUER_NOT_AUTHORIZED' in exposure['tls']['findings']
+	assert 'high' in exposure['tls']['findings_severity']
+
+
+@pytest.mark.parametrize('supports, tls13, expected', [
+	([True, True], True, 'hybrid'),
+	([True, False], True, 'partial'),
+	([False, False], True, 'classical'),
+	([False], False, 'no_tls13'),
+	([False, None], True, 'unknown'),
+])
+def testPqcKexStatus(supports, tls13, expected):
+	items = [
+		gradedItem(pqc_kex_supported=value, **({} if tls13 else {'TLSv1.3': [], 'negotiated_protocol': 'TLSv1.2'}))
+		for value in supports
+	]
+
+	assert asmira.pqcKexStatus(items) == expected
+
+
+def testExposureEventsCarryPqcKexAndFinding():
+	event = asmira.buildExposureEvents(
+		[gradedItem(negotiated_group='secp384r1', pqc_kex_supported=False)],
+		'20260731T200000Z-12345678',
+	)[0]
+	tls = event['asmira']['exposure']['tls']
+
+	assert tls['pqc_kex_status'] == 'classical'
+	assert tls['negotiated_group'] == ['secp384r1']
+	assert 'NO_PQC_KEX' in tls['findings']
+	assert tls['grade'] == 'A'
+
+
+def testFindingsKeepTheirOpeningDateAndReportFixes():
+	first = asmira.buildExposureEvents(
+		[gradedItem(**{'TLSv1.0': ['TLS_RSA_WITH_AES_128_CBC_SHA']})],
+		'20260731T200000Z-12345678',
+	)
+	firstTls = first[0]['asmira']['exposure']['tls']
+	assert set(firstTls['findings_opened']) == set(firstTls['findings'])
+	assert 'TLS10_ENABLED@2026-07-31T20:00:00+00:00' in firstTls['findings_since']
+
+	second = asmira.buildExposureEvents(
+		[gradedItem(observed_at='2026-08-07T20:00:00+00:00', **{'TLSv1.0': ['TLS_RSA_WITH_AES_128_CBC_SHA']})],
+		'20260807T200000Z-12345678',
+		previousEvents=first,
+	)
+	secondTls = second[0]['asmira']['exposure']['tls']
+	assert secondTls['findings_opened'] == []
+	assert 'TLS10_ENABLED@2026-07-31T20:00:00+00:00' in secondTls['findings_since']
+
+	third = asmira.buildExposureEvents(
+		[gradedItem(observed_at='2026-08-14T20:00:00+00:00')],
+		'20260814T200000Z-12345678',
+		previousEvents=second,
+	)
+	thirdTls = third[0]['asmira']['exposure']['tls']
+	assert thirdTls['findings_resolved'] == ['TLS10_ENABLED']
+	assert not any(value.startswith('TLS10_ENABLED@') for value in thirdTls['findings_since'])
+
+
+def testFindingsAlreadyOpenBeforeTrackingUsePreviousRunDate():
+	tls = {'findings': ['NO_TLS13']}
+
+	asmira.trackFindings(tls, ['NO_TLS13'], {}, '2026-07-31T20:00:00+00:00', '2026-08-07T20:00:00+00:00')
+
+	assert tls['findings_since'] == ['NO_TLS13@2026-07-31T20:00:00+00:00']
+	assert tls['findings_opened'] == []
+
+
+def testExposureEventsSummarisePortsAndFlagCleartextAndRdp():
+	event = asmira.buildExposureEvents([gradedItem(
+		port22='open', port80='open', port3389='open', port25='open',
+		tls_port22='ssh', tls_port80='clear', tls_port3389='tls', tls_port25='clear', tls_port443='tls',
+	)], '20260731T200000Z-12345678')[0]
+	exposure = event['asmira']['exposure']
+
+	assert exposure['open_ports'] == [22, 25, 80, 443, 3389]
+	assert exposure['cleartext_ports'] == [25]
+	assert '25:clear' in exposure['services']
+	assert exposure['port']['3389'] == {'state': ['open'], 'tls': ['tls']}
+	assert {'CLEARTEXT_SERVICE', 'RDP_EXPOSED'} <= set(exposure['tls']['findings'])
+	assert exposure['tls']['max_severity'] == 'high'
+
+
+def testExposureFindingsApplyWithoutHttps():
+	event = asmira.buildExposureEvents([gradedItem(
+		port443='filtered', certificate_sha256=None, port3389='open', tls_port3389='clear',
+	)], '20260731T200000Z-12345678')[0]
+	tls = event['asmira']['exposure']['tls']
+
+	assert 'grade' not in tls
+	assert tls['findings'] == ['CLEARTEXT_SERVICE', 'RDP_EXPOSED']
+	assert tls['findings_opened'] == ['CLEARTEXT_SERVICE', 'RDP_EXPOSED']
 
 
 def testExposureEventsCanonicalizeFqdnAndKeepOneEntity():

@@ -52,7 +52,7 @@ def testElasticJsonAssetsAreValidAndDashboardIsGlobal():
 	assert fqdnTransform['dest']['index'] == 'asmira-fqdn-latest'
 	assert 'retention_policy' not in fqdnTransform
 	assert dashboard['title'] == '[archoad] Asmira — Surface d’exposition globale'
-	assert len(dashboard['panels']) == 30
+	assert len(dashboard['panels']) == 49
 	controls = dashboard['pinned_panels']
 	assert [control['config']['title'] for control in controls] == ['Domaine', 'FQDN']
 	assert [control['config']['field_name'] for control in controls] == [
@@ -85,6 +85,26 @@ def testElasticJsonAssetsAreValidAndDashboardIsGlobal():
 		'Résolution DNS des candidats',
 		'Motifs wildcard conservés',
 		'Sources des candidats',
+		'Notes TLS des FQDN',
+		'Notes TLS par domaine',
+		'Évolution des notes TLS',
+		'FQDN à corriger',
+		'Constats les plus fréquents',
+		'Évolutions de note',
+		'Durée de vie des certificats',
+		'Autorités de certification',
+		'CAA des FQDN',
+		'FQDN avec et sans CAA par domaine',
+		'CAA et certificat actuel',
+		'Échange de clés post-quantique (ML-KEM)',
+		'Échange de clés post-quantique par domaine',
+		'Groupes d’échange de clés négociés',
+		'Constats corrigés et nouveaux par run',
+		'Constats ouverts les plus anciens',
+		'Corrections récentes',
+		'Ports ouverts',
+		'Chiffrement des services exposés',
+		'Services exposés sans chiffrement',
 	}
 	assert 'Erreurs récentes de cartographie' not in {
 		panel['config'].get('title')
@@ -95,15 +115,17 @@ def testElasticJsonAssetsAreValidAndDashboardIsGlobal():
 		for panel in dashboard['panels']
 		if panel['type'] == 'markdown'
 	]
-	assert len(markdownPanels) == 8
+	assert len(markdownPanels) == 7
 	markdownContent = '\n'.join(
 		panel['config']['content']
 		for panel in markdownPanels
 	)
 	for heading in (
-		'Vue d’ensemble',
-		'Exposition HTTP et TLS',
-		'Cryptographie observée',
+		'Synthèse',
+		'Conformité TLS et corrections',
+		'Certificats et ACME',
+		'Cryptographie et PQC',
+		'Surface d’exposition',
 		'Santé du pipeline',
 		'Découverte DNS',
 	):
@@ -224,6 +246,43 @@ def testFleetInputsUseDistinctDatasetsAndNdjson():
 	assert content.count('target_field: "@metadata._id"') == 3
 
 
+def mappedFieldNames(properties, prefix=''):
+	names = set()
+	for name, definition in properties.items():
+		path = f'{prefix}{name}'
+		if 'properties' in definition:
+			names |= mappedFieldNames(definition['properties'], f'{path}.')
+		else:
+			names.add(path)
+	return(names)
+
+
+def testDashboardOnlyUsesMappedFields():
+	import re
+	dashboard = json.loads((BASE_DIR / 'elastic/kibana/asmira-global-dashboard.json').read_text())
+	mapping = json.loads((BASE_DIR / 'elastic/elasticsearch/asmira-mappings.json').read_text())
+	known = mappedFieldNames(mapping['template']['mappings']['properties'])
+	# Le lookbehind écarte les noms d’index et de data views (logs-asmira.exposure-*).
+	used = set(re.findall(
+		r'(?<![-\w])(?:asmira|server|dns)\.[a-z0-9_.]+[a-z0-9_]',
+		json.dumps([panel['config'] for panel in dashboard['panels']]),
+	))
+
+	assert used - known == set()
+
+
+def testDashboardGridHasNoOverlap():
+	dashboard = json.loads((BASE_DIR / 'elastic/kibana/asmira-global-dashboard.json').read_text())
+	cells = set()
+	for panel in dashboard['panels']:
+		grid = panel['grid']
+		assert grid['x'] + grid['w'] <= 48
+		for x in range(grid['x'], grid['x'] + grid['w']):
+			for y in range(grid['y'], grid['y'] + grid['h']):
+				assert (x, y) not in cells
+				cells.add((x, y))
+
+
 def testElasticSetupUpdatesExistingExposureMappings():
 	class FakeClient:
 		def __init__(self):
@@ -258,6 +317,15 @@ def testElasticSetupUpdatesExistingExposureMappings():
 		assert tlsProperties['certificate_pqc_algorithms']['type'] == 'keyword'
 		assert tlsProperties['certificate_changed']['type'] == 'boolean'
 		assert tlsProperties['pqc_status_changed']['type'] == 'boolean'
+	mapping = json.loads((BASE_DIR / 'elastic/elasticsearch/asmira-mappings.json').read_text())
+	expectedExposure = (
+		mapping['template']['mappings']['properties']['asmira']['properties']['exposure']['properties']
+	)
+	for path in ('logs-asmira.exposure-default/_mapping', 'asmira-fqdn-latest/_mapping'):
+		pushedExposure = (
+			putPayloads[path]['properties']['asmira']['properties']['exposure']['properties']
+		)
+		assert pushedExposure == expectedExposure
 	runMapping = putPayloads['logs-asmira.run-default/_mapping']
 	runCounts = (
 		runMapping['properties']['asmira']['properties']['run']['properties']

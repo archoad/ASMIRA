@@ -8,6 +8,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 
+import asmiraGrade
 import fqdnCollect
 import webTLS
 from asmiraCommon import (
@@ -48,6 +49,178 @@ def baseEvent(dataset, runId, timestamp, eventId, action, outcome='success'):
 			'run': {'id': runId},
 		},
 	})
+
+
+# Identifiants CAA usuels → (autorité, offre ACME publique connue). Indicatif :
+# un identifiant absent de la table est affiché tel quel, sans présumer d’ACME.
+CAA_AUTHORITIES = {
+	'letsencrypt.org': ('Let\'s Encrypt', True),
+	'pki.goog': ('Google Trust Services', True),
+	'sectigo.com': ('Sectigo', True),
+	'comodoca.com': ('Sectigo', True),
+	'comodo.com': ('Sectigo', True),
+	'usertrust.com': ('Sectigo', True),
+	'trust-provider.com': ('Sectigo', True),
+	'digicert.com': ('DigiCert', True),
+	'symantec.com': ('DigiCert', True),
+	'geotrust.com': ('DigiCert', True),
+	'rapidssl.com': ('DigiCert', True),
+	'thawte.com': ('DigiCert', True),
+	'digitalcertvalidation.com': ('DigiCert', True),
+	'globalsign.com': ('GlobalSign', True),
+	'buypass.com': ('Buypass', True),
+	'buypass.no': ('Buypass', True),
+	'ssl.com': ('SSL.com', True),
+	'actalis.it': ('Actalis', True),
+	'harica.gr': ('HARICA', True),
+	'amazon.com': ('Amazon', False),
+	'amazontrust.com': ('Amazon', False),
+	'awstrust.com': ('Amazon', False),
+	'amazonaws.com': ('Amazon', False),
+	'microsoft.com': ('Microsoft', False),
+	'entrust.net': ('Entrust', None),
+	'certigna.fr': ('Certigna', None),
+	'certinomis.com': ('Certinomis', None),
+	'certinomis.fr': ('Certinomis', None),
+}
+CAA_DENY_ALL = '(aucune)'
+
+
+def caaIssuerDomain(value):
+	return(value.split(';', 1)[0].strip().lower())
+
+
+def caaFields(caa):
+	if not isinstance(caa, dict) or caa.get('status') not in ('present', 'absent', 'error'):
+		return(None)
+	records = [record for record in caa.get('records') or [] if isinstance(record, dict)]
+
+	def tagValues(tag):
+		return([record['value'] for record in records if record.get('tag') == tag])
+
+	issue = sortedUnique(caaIssuerDomain(value) or CAA_DENY_ALL for value in tagValues('issue'))
+	issueWild = sortedUnique(
+		caaIssuerDomain(value) or CAA_DENY_ALL for value in tagValues('issuewild')
+	)
+	authorities = sortedUnique(
+		CAA_AUTHORITIES.get(domain, (domain, None))[0] if domain != CAA_DENY_ALL else CAA_DENY_ALL
+		for domain in issue
+	)
+	acme = [CAA_AUTHORITIES.get(domain, (None, None))[1] for domain in issue]
+	return({
+		'status': caa['status'],
+		'source': caa.get('source'),
+		'issue': issue,
+		'issuewild': issueWild,
+		'iodef': sortedUnique(tagValues('iodef')),
+		'authorized_ca': authorities,
+		'acme_available': True if any(acme) else (False if acme and all(v is False for v in acme) else None),
+		# RFC 8657 : accounturi / validationmethods n’ont de sens qu’avec ACME.
+		'acme_parameters': any(
+			'accounturi=' in value or 'validationmethods=' in value
+			for value in tagValues('issue') + tagValues('issuewild')
+		),
+		'deny_all': issue == [CAA_DENY_ALL],
+	})
+
+
+# Noms d’émetteurs historiques rattachés à l’autorité qui les a absorbés.
+ISSUER_ALIASES = {
+	'comodo': 'sectigo',
+	'usertrust': 'sectigo',
+	'geotrust': 'digicert',
+	'thawte': 'digicert',
+	'rapidssl': 'digicert',
+	'symantec': 'digicert',
+}
+
+
+def issuerAuthorizedByCaa(caa, issuerOrganizations):
+	# Rapprochement par nom : « GlobalSign » autorise « GlobalSign nv-sa ».
+	if not caa or caa['status'] != 'present' or not caa['issue'] or not issuerOrganizations:
+		return(None)
+	authorities = [name.lower() for name in caa['authorized_ca'] if name != CAA_DENY_ALL]
+
+	def names(organization):
+		organization = organization.lower()
+		return([organization] + [
+			canonical for alias, canonical in ISSUER_ALIASES.items() if alias in organization
+		])
+
+	return(all(
+		any(authority in name for authority in authorities for name in names(organization))
+		for organization in issuerOrganizations
+	))
+
+
+def addFindings(tls, codes):
+	tls['findings'] = sorted(set(tls.get('findings') or []) | set(codes))
+	tls['findings_severity'] = sorted(
+		{asmiraGrade.FINDINGS[code][0] for code in tls['findings']},
+		key=asmiraGrade.SEVERITY_ORDER.index,
+	)
+	tls['max_severity'] = asmiraGrade.maxSeverity(tls['findings'])
+
+
+def pqcKexStatus(items):
+	tlsItems = [item for item in items if item.get('port443') == 'open' and item.get('certificate_sha256')]
+	if not tlsItems:
+		return(None)
+	support = [item.get('pqc_kex_supported') for item in tlsItems]
+	if all(value is True for value in support):
+		return('hybrid')
+	if any(value is True for value in support):
+		return('partial')
+	if any(value is None for value in support):
+		return('unknown')
+	hasTls13 = any(
+		item.get('TLSv1.3') or item.get('negotiated_protocol') == 'TLSv1.3'
+		for item in tlsItems
+	)
+	return('classical' if hasTls13 else 'no_tls13')
+
+
+def parseFindingsSince(values):
+	since = {}
+	for value in values or []:
+		if isinstance(value, str) and '@' in value:
+			code, date = value.split('@', 1)
+			since[code] = date
+	return(since)
+
+
+def trackFindings(tls, previousFindings, previousSince, previousTimestamp, timestamp):
+	"""Date d’ouverture de chaque constat, constats apparus et corrigés depuis le run
+	précédent. Un constat déjà présent avant la mise en place du suivi prend la date
+	du run précédent, seule date connue."""
+	if 'findings' not in tls:
+		return
+	current = set(tls['findings'])
+	previous = set(previousFindings or [])
+	since = {}
+	for code in current:
+		if code in previous:
+			since[code] = previousSince.get(code) or previousTimestamp or timestamp
+		else:
+			since[code] = timestamp
+	tls['findings_since'] = sorted(f'{code}@{date}' for code, date in since.items())
+	tls['findings_opened'] = sorted(current - previous)
+	tls['findings_resolved'] = sorted(previous - current)
+
+
+def attachDnsContext(items, inventory):
+	# Le CAA est copié dans chaque observation : il suit ainsi raw.endpoints et
+	# reste disponible quand un run ultérieur recalcule l’état précédent.
+	caaByName = {
+		record['name']: record.get('caa')
+		for record in inventory or []
+		if isinstance(record, dict) and record.get('name')
+	}
+	for item in items:
+		caa = caaByName.get(item.get('host'))
+		if caa is not None:
+			item['caa'] = caa
+	return(items)
 
 
 def parseLegacyDate(value):
@@ -173,6 +346,25 @@ def findPreviousExposureEvents(exportDir, currentRunId):
 	])
 
 
+def certificateLifetimeDays(item):
+	if isinstance(item.get('certificate_lifetime_days'), int):
+		return(item['certificate_lifetime_days'])
+	notBefore = parseLegacyDate(item.get('not_before'))
+	notAfter = parseLegacyDate(item.get('not_after'))
+	if not notBefore or not notAfter:
+		return(None)
+	return((datetime.fromisoformat(notAfter) - datetime.fromisoformat(notBefore)).days)
+
+
+def gradingItems(items):
+	# Les observations antérieures à la notation n’ont pas la durée de vie :
+	# elle est recalculée depuis les dates pour que l’état précédent soit comparable.
+	return([
+		{**item, 'certificate_lifetime_days': certificateLifetimeDays(item)}
+		for item in items
+	])
+
+
 def sortedUnique(values):
 	uniqueByJson = {}
 	for value in values:
@@ -242,6 +434,7 @@ def exposureState(event):
 			event, 'asmira', 'exposure', 'tls', 'certificate_not_after'
 		),
 		'scan_status': eventValues(event, 'asmira', 'exposure', 'scan', 'status'),
+		'tls_grade': eventValues(event, 'asmira', 'exposure', 'tls', 'grade'),
 	})
 
 
@@ -345,6 +538,21 @@ def buildFqdnObservation(items, runId):
 		parseLegacyDate(item.get('not_after'))
 		for item in items
 	)
+	certificateStartDates = sortedUnique(
+		parseLegacyDate(item.get('not_before'))
+		for item in items
+	)
+	grading = asmiraGrade.gradeFqdn(gradingItems(items))
+	openPorts = sorted({
+		port
+		for item in items
+		for port in webTLS.SCANNED_PORTS
+		if item.get(f'port{port}') == 'open'
+	})
+	caa = next(
+		(fields for fields in (caaFields(item.get('caa')) for item in items) if fields),
+		None,
+	)
 	durations = [
 		item.get('scan_duration_seconds')
 		for item in items
@@ -361,10 +569,26 @@ def buildFqdnObservation(items, runId):
 			'ip_count': len(ipAddresses),
 			'live': itemValues(items, 'live'),
 			'port': {
-				'22': {'state': itemValues(items, 'port22')},
-				'80': {'state': itemValues(items, 'port80')},
-				'443': {'state': itemValues(items, 'port443')},
+				str(port): {
+					'state': itemValues(items, f'port{port}'),
+					'tls': itemValues(items, f'tls_port{port}'),
+				}
+				for port in webTLS.SCANNED_PORTS
 			},
+			'open_ports': openPorts,
+			'cleartext_ports': sorted({
+				port
+				for item in items
+				for port in webTLS.SCANNED_PORTS
+				# Le port 80 est en clair par nature : HSTS et la redirection le couvrent.
+				if port != 80 and item.get(f'port{port}') == 'open' and item.get(f'tls_port{port}') == 'clear'
+			}),
+			'services': sortedUnique(
+				f'{port}:{item.get(f"tls_port{port}") or "inconnu"}'
+				for item in items
+				for port in webTLS.SCANNED_PORTS
+				if item.get(f'port{port}') == 'open'
+			),
 			'http': {
 				'server': itemValues(items, 'server'),
 				'title': itemValues(items, 'web_page_title'),
@@ -390,6 +614,20 @@ def buildFqdnObservation(items, runId):
 				'certificate_days_remaining': itemValues(items, 'remain'),
 				'certificate_expired': itemValues(items, 'has_expired'),
 				'issuer_organization': itemValues(items, 'issuer_organization'),
+				'issuer_common_name': itemValues(items, 'issuer_common_name'),
+				'certificate_not_before': certificateStartDates,
+				'certificate_lifetime_days': sortedUnique(
+					certificateLifetimeDays(item) for item in items
+				),
+				'certificate_key_type': itemValues(items, 'public_key'),
+				'certificate_key_size': itemValues(items, 'key_size'),
+				'certificate_signature_hash': itemValues(items, 'signature_hash'),
+				'certificate_subject_alt_names': itemListValues(items, 'subject_alt_names'),
+				'verify_message': itemValues(items, 'verify_message'),
+				'hsts_max_age': itemValues(items, 'hsts_max_age'),
+				'negotiated_group': itemValues(items, 'negotiated_group'),
+				'pqc_kex_group': itemValues(items, 'pqc_kex_group'),
+				'pqc_kex_status': pqcKexStatus(items),
 				'certificate_changed': False,
 				'pqc_status_changed': False,
 				'previous_certificate_sha256': [],
@@ -403,6 +641,24 @@ def buildFqdnObservation(items, runId):
 		},
 		'raw': {'endpoints': items},
 	})
+	exposure = event['asmira']['exposure']
+	tls = exposure['tls']
+	if caa is not None:
+		exposure['dns'] = {'caa': caa}
+	if grading is not None:
+		tls.update(grading)
+		tls.update({'grade_changed': False, 'previous_grade': None})
+		authorized = issuerAuthorizedByCaa(caa, itemValues(items, 'issuer_organization'))
+		tls['certificate_issuer_authorized'] = authorized
+		addFindings(tls, {'CAA_ISSUER_NOT_AUTHORIZED'} if authorized is False else set())
+	# Constats d’exposition : ils valent aussi pour un FQDN sans HTTPS.
+	exposureFindings = set()
+	if exposure['cleartext_ports']:
+		exposureFindings.add('CLEARTEXT_SERVICE')
+	if 3389 in exposure['open_ports']:
+		exposureFindings.add('RDP_EXPOSED')
+	if exposureFindings:
+		addFindings(tls, exposureFindings)
 	return(event)
 
 
@@ -416,6 +672,7 @@ def buildExposureEvents(items, runId, previousEvents=None, completeObservation=T
 			previousEventsByFqdn.setdefault(fqdn, []).append(event)
 	previousByFqdn = {}
 	previousPresentByFqdn = {}
+	previousSinceByFqdn = {}
 	for fqdn, fqdnEvents in previousEventsByFqdn.items():
 		presentEvents = [
 			event
@@ -445,6 +702,13 @@ def buildExposureEvents(items, runId, previousEvents=None, completeObservation=T
 			] = min(firstSeenValues)
 		previousByFqdn[fqdn] = previous
 		previousPresentByFqdn[fqdn] = bool(presentEvents)
+		latest = max(stateEvents, key=lambda event: event.get('@timestamp', ''))
+		previousSinceByFqdn[fqdn] = (
+			parseFindingsSince(
+				latest.get('asmira', {}).get('exposure', {}).get('tls', {}).get('findings_since')
+			),
+			latest.get('@timestamp'),
+		)
 	itemsByFqdn = {}
 	for item in items:
 		if item.get('host'):
@@ -476,9 +740,21 @@ def buildExposureEvents(items, runId, previousEvents=None, completeObservation=T
 				currentTls['previous_certificate_sha256'] = previousCertificates
 			if currentTls['pqc_status_changed']:
 				currentTls['previous_certificate_pqc_status'] = previousPqcStatuses
+			previousGrade = previous.get('asmira', {}).get('exposure', {}).get('tls', {}).get('grade')
+			if 'grade' in currentTls and previousGrade and previousGrade != currentTls['grade']:
+				currentTls['grade_changed'] = True
+				currentTls['previous_grade'] = previousGrade
+			trackFindings(
+				currentTls,
+				previous.get('asmira', {}).get('exposure', {}).get('tls', {}).get('findings'),
+				*previousSinceByFqdn.get(fqdn, ({}, None)),
+				event['@timestamp'],
+			)
 			event['asmira']['exposure']['change'] = (
 				'unchanged' if currentState == previousState else 'updated'
 			)
+		else:
+			trackFindings(event['asmira']['exposure']['tls'], None, {}, None, event['@timestamp'])
 		events.append(event)
 
 	disappearedAt = utcNow()
@@ -519,6 +795,10 @@ def buildExposureEvents(items, runId, previousEvents=None, completeObservation=T
 					'pqc_status_changed': False,
 					'previous_certificate_sha256': [],
 					'previous_certificate_pqc_status': [],
+					'grade_changed': False,
+					'previous_grade': None,
+					'findings_opened': [],
+					'findings_resolved': [],
 				},
 				'scan': {
 					'status': 'not_observed',
@@ -716,6 +996,7 @@ def run(config, runId=None, maxEndpoints=None, discoveryOnly=False):
 				checkpointEvery=config.checkpointEvery,
 				maxEndpoints=effectiveMaxEndpoints,
 			)
+			attachDnsContext(exposureResult['output'], discoveryResult.get('inventory'))
 			incompleteSources = [
 				f'{report.get("domain")}:{report.get("source")}:{report.get("status")}'
 				for report in discoveryResult.get('source_reports', [])

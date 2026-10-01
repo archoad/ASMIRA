@@ -71,6 +71,21 @@ DOMAIN_EXTRACTOR = tldextract.TLDExtract(suffix_list_urls=(), cache_dir=None)
 COMMAND_TIMEOUT = 15
 TLS_TIMEOUT = 8
 TLS_VERSIONS = ('TLSv1.3', 'TLSv1.2', 'TLSv1.1', 'TLSv1.0', 'SSLv3')
+SCANNED_PORTS = (22, 25, 80, 443, 465, 587, 993, 995, 3389, 8080, 8443)
+# Ports où le client ouvre directement une session TLS.
+IMPLICIT_TLS_PORTS = (443, 465, 993, 995, 8080, 8443)
+# Ports où TLS s’obtient par STARTTLS, avec le protocole attendu par OpenSSL.
+STARTTLS_PORTS = {25: 'smtp', 587: 'smtp'}
+PORT_PROBE_TIMEOUT = 5
+# Groupes d’échange de clés post-quantiques (hybrides puis purs) connus d’OpenSSL 3.5.
+PQC_KEX_GROUPS = (
+	'X25519MLKEM768',
+	'SecP256r1MLKEM768',
+	'SecP384r1MLKEM1024',
+	'MLKEM768',
+	'MLKEM1024',
+	'MLKEM512',
+)
 MANAGED_PICTURE_PREFIXES = ('graph_', 'screenshot_')
 PQC_ALGORITHMS_BY_OID = {
 	**{
@@ -164,25 +179,6 @@ CLASSICAL_CERTIFICATE_ALGORITHM_OIDS = frozenset({
 	'2.16.840.1.101.3.4.3.12',
 })
 
-
-def parseInternalNetworks(value):
-	networks = []
-	for rawNetwork in (value or '').split(','):
-		rawNetwork = rawNetwork.strip()
-		if not rawNetwork:
-			continue
-		try:
-			network = ipaddress.ip_network(rawNetwork)
-		except ValueError as error:
-			raise ValueError(
-				f'Réseau invalide dans ASMIRA_INTERNAL_NETWORKS : {rawNetwork}'
-			) from error
-		if network not in networks:
-			networks.append(network)
-	return(tuple(networks))
-
-
-INTERNAL_NETWORKS = parseInternalNetworks(os.environ.get('ASMIRA_INTERNAL_NETWORKS'))
 
 dicTools = {
 	'netcat': shutil.which('netcat') or shutil.which('nc'),
@@ -375,20 +371,16 @@ def extractDomain(host):
 
 def extractNmapPorts(data):
 	debugDisplay()
-	result = {
-		'live': 'down',
-		'port22': 'closed',
-		'port80': 'closed',
-		'port443': 'closed',
-	}
+	result = {'live': 'down'}
+	result.update({f'port{port}': 'closed' for port in SCANNED_PORTS})
 	rawData = data.stdout if hasattr(data, 'stdout') else data
 	if isinstance(rawData, bytes):
 		rawData = rawData.decode(errors='replace')
 	for row in str(rawData).splitlines():
 		if row.startswith('Host is up'):
 			result['live'] = 'up'
-		match = re.match(r'^(22|80|443)/tcp\s+(\S+)', row.strip())
-		if match:
+		match = re.match(r'^(\d+)/tcp\s+(\S+)', row.strip())
+		if match and int(match.group(1)) in SCANNED_PORTS:
 			result[f'port{match.group(1)}'] = match.group(2)
 	return(result)
 
@@ -409,12 +401,72 @@ def extractTLSdata(data):
 		certData['verify_code'] = int(verifyMatch.group(1))
 		certData['verify_message'] = verifyMatch.group(2)
 	protocolMatch = re.search(r'^\s*Protocol\s*:\s*(\S+)', data, re.MULTILINE)
-	cipherMatch = re.search(r'^\s*Cipher\s*:\s*(\S+)', data, re.MULTILINE)
+	# En TLS 1.3, OpenSSL n’imprime pas de bloc SSL-Session : la suite n’apparaît
+	# que dans la ligne « New, TLSv1.3, Cipher is … ».
+	cipherMatch = (
+		re.search(r'^\s*Cipher\s*:\s*(\S+)', data, re.MULTILINE)
+		or re.search(r'^New,\s*[^,]+,\s*Cipher is\s+(\S+)', data, re.MULTILINE)
+	)
 	if protocolMatch:
 		certData['negotiated_protocol'] = normalizeTlsVersion(protocolMatch.group(1))
-	if cipherMatch:
+	if cipherMatch and cipherMatch.group(1) not in ('0000', '(NONE)'):
 		certData['negotiated_cipher'] = cipherMatch.group(1)
+	group = extractNegotiatedGroup(data)
+	if group:
+		certData['negotiated_group'] = group
 	return(certData)
+
+
+def extractNegotiatedGroup(data):
+	# OpenSSL 3.5 nomme le groupe TLS 1.3 (« Negotiated TLS1.3 group ») ; sinon,
+	# la clé éphémère du pair donne la courbe (« Peer Temp Key: ECDH, secp521r1 »).
+	if isinstance(data, bytes):
+		data = data.decode(errors='replace')
+	match = re.search(r'Negotiated TLS1\.3 group:\s*(\S+)', data)
+	if match and match.group(1) != '<NULL>':
+		return(match.group(1))
+	match = re.search(r'(?:Peer|Server) Temp Key:\s*([^,\n]+)(?:,\s*([^,\n]+))?', data)
+	if not match:
+		return(None)
+	kind, name = match.group(1).strip(), (match.group(2) or '').strip()
+	if kind in ('ECDH', 'DH') and name and not name.endswith('bits'):
+		return(name)
+	return(kind)
+
+
+def testPqcKeyExchange(hostip, host, commandSemaphore=None):
+	"""Force une négociation TLS 1.3 limitée aux groupes ML-KEM. Renvoie le groupe
+	accepté, False si le serveur les refuse, None si la sonde n’a pas abouti."""
+	cmd = [
+		dicTools['openssl'],
+		's_client',
+		'-connect',
+		formatHostPort(hostip, 443),
+		'-servername',
+		host,
+		'-tls1_3',
+		'-groups',
+		':'.join(PQC_KEX_GROUPS),
+	]
+	try:
+		with commandSlot(commandSemaphore):
+			completed = subprocess.run(
+				cmd,
+				input=b'',
+				stderr=subprocess.STDOUT,
+				stdout=subprocess.PIPE,
+				timeout=TLS_TIMEOUT,
+				check=False,
+			)
+	except (OSError, subprocess.TimeoutExpired):
+		return(None)
+	output = completed.stdout.decode(errors='replace')
+	group = extractNegotiatedGroup(output)
+	if group in PQC_KEX_GROUPS:
+		return(group)
+	if re.search(r'New,\s*\(NONE\)|handshake failure|alert|no protocols available', output, re.IGNORECASE):
+		return(False)
+	return(None)
 
 
 def extractCertificateData(certPEM):
@@ -449,6 +501,7 @@ def extractCertificateData(certPEM):
 	result['not_after'] = notAfter.strftime('%d-%m-%Y')
 	result['remain'] = delta.days
 	result['has_expired'] = notAfter <= current
+	result['certificate_lifetime_days'] = (notAfter - notBefore).days
 	try:
 		publicKey = x509cert.public_key()
 		if isinstance(publicKey, rsa.RSAPublicKey):
@@ -535,17 +588,6 @@ def extractShodanData(data):
 	return({})
 
 
-def getAllips():
-	debugDisplay()
-	result = sorted({
-		str(ip)
-		for network in INTERNAL_NETWORKS
-		for ip in network.hosts()
-	}, key=ipSortKey)
-	print('### Number of IP adresses', len(result))
-	return(result)
-
-
 def getGeoData(hostip):
 	debugDisplay()
 	result = {
@@ -580,14 +622,6 @@ def getGeoData(hostip):
 	except (OSError, ValueError, geoip2.errors.GeoIP2Error):
 		pass
 	return(result)
-
-
-def getHostName(ip):
-	debugDisplay()
-	try:
-		return(socket.gethostbyaddr(ip))
-	except (socket.herror, socket.gaierror, TimeoutError):
-		return None, None, None
 
 
 def getNameServer(domain):
@@ -652,7 +686,7 @@ def getPorts(hostip, commandSemaphore=None):
 		*getNmapIpVersionArgs(hostip),
 		'--host-timeout',
 		f'{COMMAND_TIMEOUT}s',
-		'-p22,80,443',
+		'-p' + ','.join(str(port) for port in SCANNED_PORTS),
 		hostip,
 	]
 	try:
@@ -694,10 +728,20 @@ def getCertificate(host):
 			sock.close()
 
 
+def parseHstsMaxAge(value):
+	match = re.search(r'max-age\s*=\s*"?(\d+)', value or '', re.IGNORECASE)
+	return(int(match.group(1)) if match else None)
+
+
 def getHTTPheadersHash(host, hostip=None):
+	return(getHTTPSHeaders(host, hostip)['hhhash'])
+
+
+def getHTTPSHeaders(host, hostip=None):
 	# https://github.com/adulau/HHHash/tree/master/hhhash
 	debugDisplay()
 	hhhash = ''
+	hsts = None
 	pool = None
 	response = None
 	try:
@@ -721,6 +765,8 @@ def getHTTPheadersHash(host, hostip=None):
 			)
 		for header in response.headers.keys():
 			hhhash = f"{hhhash}:{header}"
+			if header.lower() == 'strict-transport-security':
+				hsts = response.headers[header]
 		m = hashlib.sha256()
 		m.update(hhhash[1:].encode())
 		digest = m.hexdigest()
@@ -732,7 +778,11 @@ def getHTTPheadersHash(host, hostip=None):
 			response.release_conn()
 		if pool is not None:
 			pool.close()
-	return(result)
+	return({
+		'hhhash': result,
+		'hsts': hsts,
+		'hsts_max_age': parseHstsMaxAge(hsts),
+	})
 
 
 def getHTTPData(host, ip, commandSemaphore=None):
@@ -946,17 +996,6 @@ def testShodan(ip):
 	if response and ip == response.get('ip_str'):
 		return(extractShodanData(response))
 	return({})
-
-
-def testIPnet(hostip):
-	debugDisplay()
-	if hostip is None:
-		return(False)
-	try:
-		ip = ipaddress.ip_address(hostip)
-	except ValueError:
-		return(False)
-	return(any(ip in network for network in INTERNAL_NETWORKS))
 
 
 def testTLSold(hostip):
@@ -1240,7 +1279,6 @@ def buildListIps(
 				ipDataCache[ip] = {
 					**portData,
 					**getGeoData(ip),
-					'pasi': testIPnet(ip),
 				}
 
 	for index, host, domain, perimeter in normalizedHosts:
@@ -1268,7 +1306,6 @@ def buildListIps(
 				result.update({
 					**extractNmapPorts(''),
 					**getGeoData(None),
-					'pasi': False,
 				})
 			else:
 				result.update(ipDataCache[ip])
@@ -1294,42 +1331,6 @@ def buildListIps(
 	)
 	atomicWriteJson(destinationFile, output)
 	print('### IP list built')
-	return(output)
-
-
-def buildListHostsFromIPRange():
-	debugDisplay()
-	listIps = getAllips()
-	output = []
-	cpt = 1
-	for ip in listIps:
-		host = getHostName(ip)[0]
-		if (host is not None):
-			try:
-				host = normalizeHost(host)
-				domain = extractDomain(host)
-			except (TypeError, ValueError):
-				continue
-			ns = getNameServer(domain)
-			print('%d %s (%s) --> %s' % (cpt, host, ns[0] if ns else 'NS inconnu', ip))
-			result = {
-				'host': host,
-				'ip': ip,
-				'domain_name': domain,
-				'ns': ns,
-				'alias': '',
-				**getDomainInfo(domain),
-				**getPorts(ip),
-				**getGeoData(ip),
-				'pasi': testIPnet(ip),
-			}
-			output.append(result)
-			cpt += 1
-	df = pd.DataFrame(output)
-	print(df)
-	DATA_DIR.mkdir(parents=True, exist_ok=True)
-	destinationFile = DATA_DIR / f'{now}_list_ip.json'
-	df.to_json(destinationFile, orient='records', force_ascii=False, indent=2)
 	return(output)
 
 
@@ -1367,6 +1368,97 @@ def targetKey(item):
 	return(f'{item.get("host", "")}\0{item.get("ip", "")}')
 
 
+def classifyTlsProbe(output):
+	if re.search(r'New,\s*(?:TLSv[\d.]+|SSLv3)', output):
+		return('tls')
+	if re.search(r'Connection refused|connect:errno|Connection timed out|Name or service not known', output):
+		return(None)
+	return('clear')
+
+
+def testPortEncryption(hostip, host, port, commandSemaphore=None):
+	"""Indique si le service d’un port ouvert est chiffré : tls (TLS direct),
+	starttls, ssh, clear (aucun chiffrement trouvé) ou None (sonde sans réponse)."""
+	if port == 22:
+		return('ssh')
+	if port == 80:
+		return('clear')
+	if port == 3389:
+		cmd = [
+			dicTools['nmap'], '-n', '-Pn', *getNmapIpVersionArgs(hostip),
+			'--host-timeout', '60s', '--script', 'rdp-enum-encryption', '-p3389', hostip,
+		]
+	else:
+		cmd = [
+			dicTools['openssl'], 's_client',
+			'-connect', formatHostPort(hostip, port),
+			'-servername', host,
+		]
+		if port in STARTTLS_PORTS:
+			cmd += ['-starttls', STARTTLS_PORTS[port]]
+	try:
+		with commandSlot(commandSemaphore):
+			completed = subprocess.run(
+				cmd,
+				input=b'',
+				stderr=subprocess.STDOUT,
+				stdout=subprocess.PIPE,
+				timeout=70 if port == 3389 else PORT_PROBE_TIMEOUT,
+				check=False,
+			)
+	except subprocess.TimeoutExpired as error:
+		# Un serveur TLS répond immédiatement au ClientHello. Une connexion TCP établie
+		# (« CONNECTED(») restée muette est donc un service en clair qui attend sa
+		# requête ; sans connexion, on ne peut pas conclure.
+		partial = (error.stdout or b'').decode(errors='replace')
+		if port in IMPLICIT_TLS_PORTS and 'CONNECTED(' in partial:
+			return('clear')
+		return(None)
+	except OSError:
+		return(None)
+	output = completed.stdout.decode(errors='replace')
+	if port == 3389:
+		# CredSSP (NLA) et la couche « SSL » reposent sur TLS ; « Native RDP » seul
+		# signifie le chiffrement RDP historique (RC4).
+		if re.search(r'(?:CredSSP[^:]*|SSL):\s*SUCCESS', output):
+			return('tls')
+		if re.search(r'Native RDP:\s*SUCCESS', output):
+			return('clear')
+		return(None)
+	result = classifyTlsProbe(output)
+	if result == 'tls' and port in STARTTLS_PORTS:
+		return('starttls')
+	return(result)
+
+
+def analysePortEncryption(item, ip, host, commandSemaphore=None):
+	result = {}
+	for port in SCANNED_PORTS:
+		if item.get(f'port{port}') != 'open':
+			continue
+		if port == 443 and item.get('certificate_sha256'):
+			result['tls_port443'] = 'tls'
+			continue
+		result[f'tls_port{port}'] = testPortEncryption(
+			ip, host, port, commandSemaphore=commandSemaphore,
+		)
+	return(result)
+
+
+def analysePqcKeyExchange(item, ip, host, commandSemaphore=None):
+	if item.get('negotiated_group') in PQC_KEX_GROUPS:
+		return({'pqc_kex_group': item['negotiated_group'], 'pqc_kex_supported': True})
+	supportsTls13 = bool(item.get('TLSv1.3')) or item.get('negotiated_protocol') == 'TLSv1.3'
+	if not supportsTls13:
+		# ML-KEM n’existe qu’en TLS 1.3 : inutile de sonder.
+		return({'pqc_kex_group': None, 'pqc_kex_supported': False if item.get('certificate_sha256') else None})
+	group = testPqcKeyExchange(ip, host, commandSemaphore=commandSemaphore)
+	return({
+		'pqc_kex_group': group or None,
+		'pqc_kex_supported': None if group is None else bool(group),
+	})
+
+
 def analyseEndpoint(
 	item,
 	captureScreenshots=True,
@@ -1393,7 +1485,7 @@ def analyseEndpoint(
 				)
 				item.update(httpData)
 			if item.get('port443') == 'open':
-				item['hhhash'] = getHTTPheadersHash(host, ip)
+				item.update(getHTTPSHeaders(host, ip))
 				if captureScreenshots:
 					item.update(getScreenShot(host, ip))
 				item.update(
@@ -1421,6 +1513,26 @@ def analyseEndpoint(
 				for key, value in ciphers.items():
 					item[key] = value
 					item[f'nbr {key}'] = len(value)
+				item.update(analysePqcKeyExchange(
+					item,
+					ip,
+					host,
+					**(
+						{'commandSemaphore': commandSemaphore}
+						if commandSemaphore is not None
+						else {}
+					),
+				))
+			item.update(analysePortEncryption(
+				item,
+				ip,
+				host,
+				**(
+					{'commandSemaphore': commandSemaphore}
+					if commandSemaphore is not None
+					else {}
+				),
+			))
 	except Exception as error:
 		item['scan_status'] = 'failed'
 		item['scan_error'] = f'{type(error).__name__}: {error}'
@@ -1654,7 +1766,6 @@ def computeGraphs(jsonFile=None):
 	graphByColumn(df, 'live', 'pie', 0)
 	graphByColumn(df, 'port80', 'pie', 0)
 	graphByColumn(df, 'port443', 'pie', 0)
-	graphByColumn(df, 'pasi', 'pie', 0)
 	graphByColumn(df, 'self-signed', 'pie', 0)
 	graphByColumn(df, 'domain_name', 'pie', 4)
 	graphByColumn(df, 'geo_country', 'pie', 0)
@@ -1701,7 +1812,6 @@ def tlsCartography(
 		maxEndpoints=maxEndpoints,
 		commandSemaphore=commandSemaphore,
 	)
-	#buildListHostsFromIPRange()
 	output = tlsAnalyse(
 		captureScreenshots=captureScreenshots,
 		listIpFile=listIpFile,

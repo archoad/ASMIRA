@@ -140,23 +140,22 @@
                 "live": { "type": "keyword" },
                 "port": {
                   "properties": {
-                    "22": {
-                      "properties": {
-                        "state": { "type": "keyword" }
-                      }
-                    },
-                    "80": {
-                      "properties": {
-                        "state": { "type": "keyword" }
-                      }
-                    },
-                    "443": {
-                      "properties": {
-                        "state": { "type": "keyword" }
-                      }
-                    }
+                    "22": { "properties": { "state": { "type": "keyword" }, "tls": { "type": "keyword" } } },
+                    "25": { "properties": { "state": { "type": "keyword" }, "tls": { "type": "keyword" } } },
+                    "80": { "properties": { "state": { "type": "keyword" }, "tls": { "type": "keyword" } } },
+                    "443": { "properties": { "state": { "type": "keyword" }, "tls": { "type": "keyword" } } },
+                    "465": { "properties": { "state": { "type": "keyword" }, "tls": { "type": "keyword" } } },
+                    "587": { "properties": { "state": { "type": "keyword" }, "tls": { "type": "keyword" } } },
+                    "993": { "properties": { "state": { "type": "keyword" }, "tls": { "type": "keyword" } } },
+                    "995": { "properties": { "state": { "type": "keyword" }, "tls": { "type": "keyword" } } },
+                    "3389": { "properties": { "state": { "type": "keyword" }, "tls": { "type": "keyword" } } },
+                    "8080": { "properties": { "state": { "type": "keyword" }, "tls": { "type": "keyword" } } },
+                    "8443": { "properties": { "state": { "type": "keyword" }, "tls": { "type": "keyword" } } }
                   }
                 },
+                "open_ports": { "type": "integer" },
+                "cleartext_ports": { "type": "integer" },
+                "services": { "type": "keyword" },
                 "http": {
                   "properties": {
                     "server": { "type": "keyword" },
@@ -184,7 +183,52 @@
                     "certificate_not_after": { "type": "date" },
                     "certificate_days_remaining": { "type": "integer" },
                     "certificate_expired": { "type": "boolean" },
-                    "issuer_organization": { "type": "keyword" }
+                    "issuer_organization": { "type": "keyword" },
+                    "issuer_common_name": { "type": "keyword" },
+                    "certificate_not_before": { "type": "date" },
+                    "certificate_lifetime_days": { "type": "integer" },
+                    "certificate_key_type": { "type": "keyword" },
+                    "certificate_key_size": { "type": "integer" },
+                    "certificate_signature_hash": { "type": "keyword" },
+                    "certificate_subject_alt_names": { "type": "keyword" },
+                    "verify_message": { "type": "keyword" },
+                    "hsts_max_age": { "type": "long" },
+                    "grade": { "type": "keyword" },
+                    "grade_if_trusted": { "type": "keyword" },
+                    "grade_version": { "type": "keyword" },
+                    "score": { "type": "integer" },
+                    "protocol_score": { "type": "integer" },
+                    "key_exchange_score": { "type": "integer" },
+                    "cipher_score": { "type": "integer" },
+                    "findings": { "type": "keyword" },
+                    "findings_severity": { "type": "keyword" },
+                    "grade_changed": { "type": "boolean" },
+                    "previous_grade": { "type": "keyword" },
+                    "certificate_issuer_authorized": { "type": "boolean" },
+                    "negotiated_group": { "type": "keyword" },
+                    "pqc_kex_group": { "type": "keyword" },
+                    "pqc_kex_status": { "type": "keyword" },
+                    "findings_since": { "type": "keyword" },
+                    "findings_opened": { "type": "keyword" },
+                    "findings_resolved": { "type": "keyword" },
+                    "max_severity": { "type": "keyword" }
+                  }
+                },
+                "dns": {
+                  "properties": {
+                    "caa": {
+                      "properties": {
+                        "status": { "type": "keyword" },
+                        "source": { "type": "keyword" },
+                        "issue": { "type": "keyword" },
+                        "issuewild": { "type": "keyword" },
+                        "iodef": { "type": "keyword" },
+                        "authorized_ca": { "type": "keyword" },
+                        "acme_available": { "type": "boolean" },
+                        "acme_parameters": { "type": "boolean" },
+                        "deny_all": { "type": "boolean" }
+                      }
+                    }
                   }
                 },
                 "scan": {

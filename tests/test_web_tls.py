@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta, timezone
+import subprocess
 from types import SimpleNamespace
 
 import pandas as pd
@@ -9,21 +10,6 @@ from cryptography.hazmat.primitives.asymmetric import ed25519, rsa
 from cryptography.x509.oid import NameOID
 
 import webTLS
-
-
-def testParseInternalNetworksUsesOnlyLocalConfiguration():
-	result = webTLS.parseInternalNetworks('192.0.2.0/24, 2001:db8::/32,192.0.2.0/24')
-
-	assert tuple(str(network) for network in result) == (
-		'192.0.2.0/24',
-		'2001:db8::/32',
-	)
-	assert webTLS.parseInternalNetworks('') == ()
-
-
-def testParseInternalNetworksRejectsInvalidCidrs():
-	with pytest.raises(ValueError, match='ASMIRA_INTERNAL_NETWORKS'):
-		webTLS.parseInternalNetworks('not-a-network')
 
 
 def testGetDomainInfoUsesInstalledQueryApi(monkeypatch):
@@ -196,12 +182,15 @@ Host is up (0.010s latency).
 8080/tcp open    http-proxy
 ''')
 
-	assert webTLS.extractNmapPorts(data) == {
-		'live': 'up',
-		'port22': 'filtered',
-		'port80': 'open',
-		'port443': 'closed',
-	}
+	ports = webTLS.extractNmapPorts(data)
+
+	assert set(ports) == {'live'} | {f'port{port}' for port in webTLS.SCANNED_PORTS}
+	assert ports['live'] == 'up'
+	assert ports['port22'] == 'filtered'
+	assert ports['port80'] == 'open'
+	assert ports['port443'] == 'closed'
+	assert ports['port8080'] == 'open'
+	assert ports['port3389'] == 'closed'
 
 
 def testGetIPsReturnsAllIpv4AndIpv6Addresses(monkeypatch):
@@ -426,6 +415,121 @@ def testExtractTLSDataIncludesVerificationAndNegotiation():
 	assert result['negotiated_cipher'] == 'ECDHE-RSA-AES128-GCM-SHA256'
 
 
+def testExtractTLSDataReadsTls13CipherLine():
+	privateKey = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+	certificate = buildCertificate(privateKey).decode()
+	output = f'''
+{certificate}
+New, TLSv1.3, Cipher is TLS_AES_256_GCM_SHA384
+Protocol: TLSv1.3
+Verify return code: 0 (ok)
+'''
+
+	result = webTLS.extractTLSdata(output)
+
+	assert result['negotiated_protocol'] == 'TLSv1.3'
+	assert result['negotiated_cipher'] == 'TLS_AES_256_GCM_SHA384'
+	assert isinstance(result['certificate_lifetime_days'], int)
+
+
+@pytest.mark.parametrize('value, expected', [
+	('max-age=31536000; includeSubDomains', 31536000),
+	('MAX-AGE="600"', 600),
+	('includeSubDomains', None),
+	(None, None),
+])
+def testParseHstsMaxAge(value, expected):
+	assert webTLS.parseHstsMaxAge(value) == expected
+
+
+@pytest.mark.parametrize('output, expected', [
+	('Negotiated TLS1.3 group: X25519MLKEM768\n', 'X25519MLKEM768'),
+	('Negotiated TLS1.3 group: <NULL>\n', None),
+	('Peer Temp Key: ECDH, secp521r1, 521 bits\n', 'secp521r1'),
+	('Server Temp Key: X25519, 253 bits\n', 'X25519'),
+	('rien\n', None),
+])
+def testExtractNegotiatedGroup(output, expected):
+	assert webTLS.extractNegotiatedGroup(output) == expected
+
+
+@pytest.mark.parametrize('output, expected', [
+	(b'Negotiated TLS1.3 group: X25519MLKEM768\nNew, TLSv1.3, Cipher is TLS_AES_256_GCM_SHA384\n', 'X25519MLKEM768'),
+	(b'Negotiated TLS1.3 group: <NULL>\nNew, (NONE), Cipher is (NONE)\n', False),
+	(b'connect:errno=111\n', None),
+])
+def testPqcKeyExchangeProbe(monkeypatch, output, expected):
+	commands = []
+
+	def fakeRun(command, **kwargs):
+		commands.append(command)
+		return(SimpleNamespace(stdout=output))
+
+	monkeypatch.setattr(webTLS.subprocess, 'run', fakeRun)
+
+	assert webTLS.testPqcKeyExchange('192.0.2.1', 'www.example.com') == expected
+	assert '-tls1_3' in commands[0]
+	assert commands[0][commands[0].index('-groups') + 1].startswith('X25519MLKEM768:')
+
+
+def testPqcAnalysisSkipsProbeWhenAlreadyNegotiatedOrWithoutTls13(monkeypatch):
+	monkeypatch.setattr(webTLS, 'testPqcKeyExchange', lambda *args, **kwargs: pytest.fail('sonde inutile'))
+
+	assert webTLS.analysePqcKeyExchange(
+		{'negotiated_group': 'X25519MLKEM768'}, '192.0.2.1', 'www.example.com',
+	) == {'pqc_kex_group': 'X25519MLKEM768', 'pqc_kex_supported': True}
+	assert webTLS.analysePqcKeyExchange(
+		{'TLSv1.2': ['x'], 'certificate_sha256': 'a'}, '192.0.2.1', 'www.example.com',
+	) == {'pqc_kex_group': None, 'pqc_kex_supported': False}
+
+
+@pytest.mark.parametrize('port, output, expected', [
+	(993, b'CONNECTED(00000003)\nNew, TLSv1.3, Cipher is TLS_AES_256_GCM_SHA384\n', 'tls'),
+	(587, b'CONNECTED(00000003)\nNew, TLSv1.3, Cipher is TLS_AES_256_GCM_SHA384\n', 'starttls'),
+	(8080, b'CONNECTED(00000003)\nerror:0A00010B:SSL routines::wrong version number\n', 'clear'),
+	(465, b'connect:errno=111\n', None),
+	(3389, b'| rdp-enum-encryption:\n|   Security layer\n|     CredSSP (NLA): SUCCESS\n', 'tls'),
+	(3389, b'| rdp-enum-encryption:\n|   Security layer\n|     Native RDP: SUCCESS\n', 'clear'),
+])
+def testPortEncryptionProbe(monkeypatch, port, output, expected):
+	commands = []
+
+	def fakeRun(command, **kwargs):
+		commands.append(command)
+		return(SimpleNamespace(stdout=output))
+
+	monkeypatch.setattr(webTLS.subprocess, 'run', fakeRun)
+
+	assert webTLS.testPortEncryption('192.0.2.1', 'mail.example.com', port) == expected
+	if port == 587:
+		assert commands[0][-2:] == ['-starttls', 'smtp']
+
+
+def testSilentEstablishedConnectionIsCleartext(monkeypatch):
+	def fakeRun(command, **kwargs):
+		raise subprocess.TimeoutExpired(command, 5, output=b'CONNECTED(00000003)\n')
+
+	monkeypatch.setattr(webTLS.subprocess, 'run', fakeRun)
+
+	assert webTLS.testPortEncryption('192.0.2.1', 'www.example.com', 8443) == 'clear'
+
+
+def testUnreachablePortStaysUndetermined(monkeypatch):
+	def fakeRun(command, **kwargs):
+		raise subprocess.TimeoutExpired(command, 5, output=b'')
+
+	monkeypatch.setattr(webTLS.subprocess, 'run', fakeRun)
+
+	assert webTLS.testPortEncryption('192.0.2.1', 'www.example.com', 8443) is None
+
+
+def testPortEncryptionWithoutProbeForSshAndHttp(monkeypatch):
+	monkeypatch.setattr(webTLS.subprocess, 'run', lambda *args, **kwargs: pytest.fail('sonde inutile'))
+
+	assert webTLS.testPortEncryption('192.0.2.1', 'www.example.com', 22) == 'ssh'
+	assert webTLS.testPortEncryption('192.0.2.1', 'www.example.com', 80) == 'clear'
+
+
 def testReqNetcatSendsBytesAndParsesAllHeaders(monkeypatch):
 	def fakeRun(command, **kwargs):
 		assert command[-2:] == ['www.example.com', '80']
@@ -471,7 +575,7 @@ def testHTTPheadersHashPinsTheSelectedIpAndSni(monkeypatch):
 	captured = {}
 
 	class FakeResponse:
-		headers = {'Server': 'nginx', 'Date': 'now'}
+		headers = {'Server': 'nginx', 'Strict-Transport-Security': 'max-age=63072000'}
 
 		def release_conn(self):
 			captured['released'] = True
@@ -499,6 +603,8 @@ def testHTTPheadersHashPinsTheSelectedIpAndSni(monkeypatch):
 	assert captured['released'] is True
 	assert captured['closed'] is True
 	assert result.startswith('hhh:1:')
+	details = webTLS.getHTTPSHeaders('www.example.com', '192.0.2.10')
+	assert details['hsts_max_age'] == 63072000
 
 
 def testTestTLSChecksChainAndHostname(monkeypatch):
@@ -567,7 +673,6 @@ def testBuildListIpsPreservesVirtualHostsSharingAnIp(monkeypatch, tmp_path):
 	monkeypatch.setattr(webTLS, 'getPorts', fakePorts)
 	monkeypatch.setattr(webTLS, 'getDomainInfo', fakeWhois)
 	monkeypatch.setattr(webTLS, 'getGeoData', lambda ip: {})
-	monkeypatch.setattr(webTLS, 'testIPnet', lambda ip: False)
 
 	result = webTLS.buildListIps(['www.example.com', 'api.example.com'])
 
@@ -595,7 +700,6 @@ def testBuildListIpsSupportsMixedIpv4AndIpv6(monkeypatch, tmp_path):
 	monkeypatch.setattr(webTLS, 'getPorts', fakePorts)
 	monkeypatch.setattr(webTLS, 'getDomainInfo', lambda domain: webTLS.getUnknownDomainInfo())
 	monkeypatch.setattr(webTLS, 'getGeoData', lambda ip: {})
-	monkeypatch.setattr(webTLS, 'testIPnet', lambda ip: False)
 
 	result = webTLS.buildListIps(
 		['www.example.com'],

@@ -16,12 +16,14 @@ charger des rapports d'exécution potentiellement sensibles.
 | Configuration, identifiants et écritures atomiques | [`asmiraCommon.py`](asmiraCommon.py) |
 | Découverte, normalisation et validation DNS | [`fqdnCollect.py`](fqdnCollect.py) |
 | Cartographie active HTTP/TLS et reporting | [`webTLS.py`](webTLS.py) |
+| Notation TLS et codes de constat | [`asmiraGrade.py`](asmiraGrade.py) |
 | Exemple de configuration | [`config/asmira.conf.example`](config/asmira.conf.example) |
 | Unités systemd | [`deploy/systemd/`](deploy/systemd/) |
 | Assets Elasticsearch, Fleet et Kibana | [`elastic/`](elastic/) |
 | Tests de l’orchestrateur et du déploiement | [`tests/test_asmira.py`](tests/test_asmira.py), [`tests/test_deployment_assets.py`](tests/test_deployment_assets.py) |
 | Tests de la découverte | [`tests/test_fqdn_collect.py`](tests/test_fqdn_collect.py) |
 | Tests de la cartographie TLS | [`tests/test_web_tls.py`](tests/test_web_tls.py) |
+| Tests de la notation | [`tests/test_grade.py`](tests/test_grade.py) |
 
 ## Chaîne de traitement
 

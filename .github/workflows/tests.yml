@@ -28,9 +28,9 @@ jobs:
       - name: Vérifier la syntaxe
         run: >-
           python -m py_compile
-          asmira.py asmiraCommon.py fqdnCollect.py webTLS.py elastic/setup.py
+          asmira.py asmiraCommon.py asmiraGrade.py fqdnCollect.py webTLS.py elastic/setup.py
           tests/test_asmira.py tests/test_deployment_assets.py
-          tests/test_fqdn_collect.py tests/test_web_tls.py
+          tests/test_fqdn_collect.py tests/test_grade.py tests/test_web_tls.py
 
       - name: Exécuter les tests
         run: python -m pytest -q

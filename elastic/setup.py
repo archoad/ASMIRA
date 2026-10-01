@@ -139,18 +139,6 @@ def configureElasticsearch(client, retentionDays):
 		mappingAsset['template']['mappings']['properties']['asmira']['properties']
 		['exposure']['properties']
 	)
-	tlsProperties = exposureProperties['tls']['properties']
-	tlsFieldNames = (
-		'certificate_sha256',
-		'certificate_public_key_algorithm_oid',
-		'certificate_signature_algorithm_oid',
-		'certificate_pqc_algorithms',
-		'certificate_pqc_status',
-		'certificate_changed',
-		'pqc_status_changed',
-		'previous_certificate_sha256',
-		'previous_certificate_pqc_status',
-	)
 	exposureMapping = {
 		'properties': {
 			'server': {
@@ -161,24 +149,9 @@ def configureElasticsearch(client, retentionDays):
 			},
 			'asmira': {
 				'properties': {
-					'exposure': {
-						'properties': {
-							fieldName: exposureProperties[fieldName]
-							for fieldName in (
-								'first_seen_at',
-								'last_seen_at',
-								'endpoint_count',
-								'ip_count',
-							)
-						} | {
-							'tls': {
-								'properties': {
-									fieldName: tlsProperties[fieldName]
-									for fieldName in tlsFieldNames
-								},
-							},
-						},
-					},
+					# Bloc complet : ajouter un champ au mapping suffit à
+					# l’appliquer aux index existants.
+					'exposure': {'properties': exposureProperties},
 				},
 			},
 		},

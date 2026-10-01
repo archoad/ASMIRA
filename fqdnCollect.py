@@ -889,6 +889,47 @@ class DnsValidator:
 		if resolver is None:
 			self.resolver.timeout = timeout
 			self.resolver.lifetime = timeout
+		self.caaCache = {}
+		self.caaLock = threading.Lock()
+
+	def caaRecords(self, name):
+		# Mis en cache : les FQDN d’une même zone partagent leurs parents.
+		with self.caaLock:
+			if name in self.caaCache:
+				return(self.caaCache[name])
+		try:
+			answer = self.resolver.resolve(name, 'CAA', raise_on_no_answer=False)
+			records = [
+				{
+					'flags': int(rdata.flags),
+					'tag': rdata.tag.decode(errors='replace').lower(),
+					'value': rdata.value.decode(errors='replace').strip(),
+				}
+				for rdata in (answer.rrset or [])
+			]
+		except (dns.resolver.NXDOMAIN, dns.resolver.NoAnswer):
+			records = []
+		except dns.exception.DNSException as error:
+			records = None
+			print(f'[avertissement] CAA {name}: {type(error).__name__}', file=sys.stderr)
+		with self.caaLock:
+			self.caaCache[name] = records
+		return(records)
+
+	def effectiveCaa(self, host, domain):
+		"""CAA applicable à host (RFC 8659) : premier ensemble non vide en remontant
+		jusqu’au domaine enregistré. Les CNAME sont suivis par la résolution."""
+		host = normalizeHost(host)
+		names = [host] + getParentZones(host, domain)
+		if domain not in names:
+			names.append(domain)
+		for name in names:
+			records = self.caaRecords(name)
+			if records is None:
+				return({'status': 'error', 'source': name, 'records': []})
+			if records:
+				return({'status': 'present', 'source': name, 'records': records})
+		return({'status': 'absent', 'source': None, 'records': []})
 
 	def resolveHost(self, host):
 		host = normalizeHost(host)
@@ -1029,6 +1070,28 @@ def resolveCandidateHosts(
 						'errors': {'resolver': f'{type(error).__name__}: {error}'},
 					}
 
+	caaResults = {}
+	resolvableRecords = [
+		record for record in explicitRecords if dnsResults[record['name']]['resolvable']
+	]
+	if resolvableRecords and hasattr(dnsValidator, 'effectiveCaa'):
+		with ThreadPoolExecutor(max_workers=min(workers, len(resolvableRecords))) as executor:
+			futureMap = {
+				executor.submit(dnsValidator.effectiveCaa, record['name'], record['domain']): record['name']
+				for record in resolvableRecords
+			}
+			for future in as_completed(futureMap):
+				host = futureMap[future]
+				try:
+					caaResults[host] = future.result()
+				except Exception as error:
+					caaResults[host] = {
+						'status': 'error',
+						'source': None,
+						'records': [],
+						'error': f'{type(error).__name__}: {error}',
+					}
+
 	wildcardReports = {}
 	for zone in getWildcardZones(candidateRecords):
 		try:
@@ -1079,6 +1142,7 @@ def resolveCandidateHosts(
 		inventoryRecord['related_wildcard_patterns'] = sorted(
 			wildcardPatternsByDomain.get(record['domain'], [])
 		)
+		inventoryRecord['caa'] = caaResults.get(record['name'])
 		inventory.append(inventoryRecord)
 
 	return(
@@ -1252,6 +1316,10 @@ def hostCartography(
 			'candidates': len(candidateRecords),
 			'explicit_candidates': len(inventory),
 			'resolvable_hosts': len(resolvableHosts),
+			'caa_present': sum(
+				1 for record in inventory
+				if (record.get('caa') or {}).get('status') == 'present'
+			),
 		},
 	}
 	writeJson(reportFile, report)

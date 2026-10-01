@@ -184,9 +184,7 @@ confirmé fonctionnel le 3 août 2026 avec 100 endpoints.
   sa licence est `GPL-3.0-only` et aucune release GitHub n’est prévue.
 - `AGENTS.md` et `DEPLOYMENT.md` restent des documents locaux ignorés par Git ;
   ils ne sont pas publiés dans le dépôt GitHub.
-- Les bases GeoIP, le GeoJSON local et les plages propres à l’opérateur ne sont
-  pas versionnés. Les préfixes facultatifs sont lus depuis
-  `ASMIRA_INTERNAL_NETWORKS` dans l’environnement protégé.
+- Les bases GeoIP et le GeoJSON local ne sont pas versionnés.
 - Les écritures atomiques (`atomicWriteJson`, `atomicWriteNdjson`) appliquent
   l’umask du processus au lieu du mode 0600 imposé par `mkstemp()` : sous
   `UMask=0027`, les rapports, exports et états sont créés en 0640. Sur `srv`,
@@ -235,9 +233,57 @@ confirmé fonctionnel le 3 août 2026 avec 100 endpoints.
 Depuis la racine du dépôt :
 
 ```sh
-python3 -m py_compile asmira.py asmiraCommon.py fqdnCollect.py webTLS.py elastic/setup.py tests/test_asmira.py tests/test_deployment_assets.py tests/test_fqdn_collect.py tests/test_web_tls.py
+python3 -m py_compile asmira.py asmiraCommon.py asmiraGrade.py fqdnCollect.py webTLS.py elastic/setup.py tests/test_asmira.py tests/test_deployment_assets.py tests/test_fqdn_collect.py tests/test_grade.py tests/test_web_tls.py
 python3 -m pytest -q
 ```
+
+## Feuille de route validée le 1er octobre 2026
+
+Objectifs reprécisés : découverte exhaustive des FQDN des domaines ciblés,
+ports et certificats de chaque FQDN, note de conformité TLS par FQDN avec suivi
+des corrections, visibilité DNS/CAA pour le déploiement d’ACME interne, et
+visibilité PQC. La notion de propriétaire par FQDN n’est pas retenue.
+
+1. Corrections et indexation : bug de la suite TLS 1.3 négociée, indexation
+   des champs de certificat déjà collectés, HSTS, note v1 (`asmiraGrade.py`,
+   modèle inspiré de SSL Labs, versionné) et sections Synthèse, Conformité,
+   Certificats du dashboard. **Déployée sur `srv` (code et mapping) le
+   1er octobre 2026.**
+2. Collecte DNS/CAA : présence d’un CAA effectif par FQDN et autorités
+   autorisées ; graphe FQDN avec ou sans CAA et CA autorisée.
+3. Sonde PQC : échange de clés hybride ML-KEM (`X25519MLKEM768`, OpenSSL 3.5
+   disponible sur `srv`) et vue PQC.
+4. Constats et suivi des corrections (sans propriétaires).
+5. Ports élargis à 22, 25, 80, 443, 465, 587, 993, 995, 3389, 8080 et 8443,
+   avec un indicateur de présence TLS par port pour repérer les services non
+   chiffrés.
+
+Les phases 2 à 5 sont réalisées et validées sur les données du 29 septembre,
+puis déployées sur `srv` (code et mapping) le 1er octobre 2026, avant le run de
+test du soir. `setup.py` pousse désormais tout le bloc `exposure` du mapping
+sur les index existants. Le
+dashboard refondu (49 panneaux) est publié dans Kibana sous l’identifiant
+`asmira-global-preview` en attendant de remplacer `asmira-global`. Le fichier
+`elastic/kibana/asmira-global-dashboard.json` en reste la source de vérité.
+
+Points techniques retenus :
+
+- Le CAA effectif suit la RFC 8659 jusqu’au domaine enregistré ; 189 FQDN
+  résolus avaient un CAA au 29 septembre, posé sur des sous-domaines.
+- La sonde PQC lit d’abord le groupe négocié par la connexion `testTLS`
+  (OpenSSL 3.5 propose ML-KEM en premier) et ne force une négociation limitée
+  aux groupes ML-KEM que si le serveur a choisi un groupe classique.
+- Un port à TLS implicite dont la connexion TCP aboutit sans réponse TLS est
+  classé en clair : un serveur TLS répond toujours au ClientHello.
+- Le port 80 est classé en clair sans sonde et n’entre pas dans
+  `cleartext_ports`.
+- Le suivi des constats est porté par l’entité FQDN (`findings_since` au
+  format `CODE@date`), sans nouveau data stream ni modification Fleet.
+- Sur `srv`, `fqdnCollect.py` conserve `DEFAULT_HOSTS` adapté à l’opérateur :
+  cette valeur locale doit être préservée à chaque déploiement.
+- La notion de plages réseau internes (`INTERNAL_NETWORKS`,
+  `ASMIRA_INTERNAL_NETWORKS`, champ `pasi`) et le balayage de ces plages ont
+  été supprimés le 1er octobre 2026 ; ils n’étaient pas exploités.
 
 ## Éléments non décidés
 
@@ -354,3 +400,14 @@ python3 -m pytest -q
   le setup Elasticsearch n’ayant pas été rejoué depuis le 9 août : il a été
   arrêté puis supprimé avec son index, sans référence restante. `setup.py`
   supprime désormais ce transform et cet index au lieu de seulement l’arrêter.
+- **2026-10-01 :** création du site d’information statique d’ASMIRA, sur le
+  modèle de celui d’OpenIRN : accueil, centre de documentation, carte
+  fonctionnelle et huit guides (installation, configuration, intégration
+  Elastic, administration, notation et constats, lecture du dashboard,
+  référence des données, sécurité). Les guides sont rédigés en Markdown dans
+  `site/content/` et générés dans `web/guides/` par `site/build.sh` (pandoc).
+  Le site est autonome et sous CSP stricte, sans ressource externe ni style
+  inline ; il ne mentionne aucun domaine, serveur ni adresse réels. Il est
+  publié sur <https://www.archoad.io/asmira/>. `site/` et le résultat généré
+  `web/` (ancien `docs/`) restent locaux et exclus de Git ; les guides n’offrent
+  donc pas de lien vers leur source Markdown.
