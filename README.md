@@ -89,7 +89,8 @@ python3 webTLS.py --authorized-active-scan
 Les assets de déploiement orchestré et d’intégration Elastic sont fournis dans
 `deploy/` et `elastic/`. Les procédures opérateur propres à l’environnement de
 production restent locales et ne sont pas versionnées. Le projet est distribué
-depuis son code source ; aucune release GitHub n’est prévue.
+depuis son code source, par versions étiquetées (`v1.0.0` le 1er octobre
+2026) dont GitHub fournit les archives.
 
 ## Notation TLS
 

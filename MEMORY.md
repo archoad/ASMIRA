@@ -181,7 +181,8 @@ confirmé fonctionnel le 3 août 2026 avec 100 endpoints.
 - Les rapports, captures, caches et inventaires sensibles ne sont pas
   versionnés.
 - Le dépôt GitHub public est `archoad/ASMIRA`, sa branche principale est `main`,
-  sa licence est `GPL-3.0-only` et aucune release GitHub n’est prévue.
+  sa licence est `GPL-3.0-only`. Les versions sont des tags (`v1.0.0`
+  depuis le 1er octobre 2026) dont GitHub fournit les archives source.
 - `AGENTS.md` et `DEPLOYMENT.md` restent des documents locaux ignorés par Git ;
   ils ne sont pas publiés dans le dépôt GitHub.
 - Les bases GeoIP et le GeoJSON local ne sont pas versionnés.
@@ -420,3 +421,7 @@ Points techniques retenus :
   `none`) signalent l’adoption de l’hybridation, échange de clés et signature
   du certificat. Le modèle de note passe en v2 : +10 points sur l’échange de
   clés avec un groupe hybride, et A+ exige HSTS et l’échange de clés hybride.
+- **2026-10-01 — Version 1.0.0.** Premier tag `v1.0.0` sur le commit
+  « Notation v2 ». Le projet reste distribué depuis son code source ; les
+  archives `tar.gz` et `zip` du tag sont fournies par GitHub. Le site pointe
+  vers cette version.
