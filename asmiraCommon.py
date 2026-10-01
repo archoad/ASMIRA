@@ -15,6 +15,16 @@ from pathlib import Path
 DEFAULT_CONFIG_PATH = Path('/etc/asmira/asmira.conf')
 RUN_ID_PATTERN = re.compile(r'^[0-9]{8}T[0-9]{6}Z-[0-9a-f]{8}$')
 FORBIDDEN_CONFIG_NAMES = ('api_key', 'apikey', 'password', 'private_key', 'secret', 'token')
+# Lu une seule fois à l’import : os.umask() modifie l’état global du processus et
+# ne doit pas être appelé depuis les threads de collecte ou d’analyse.
+PROCESS_UMASK = os.umask(0)
+os.umask(PROCESS_UMASK)
+
+
+def applyCreationMode(fileDescriptor):
+	# mkstemp() force 0600 ; on rétablit le mode d’un open() classique pour que
+	# l’UMask du service (0027 → 0640) et les ACL par défaut s’appliquent.
+	os.fchmod(fileDescriptor, 0o666 & ~PROCESS_UMASK)
 
 
 def utcNow():
@@ -49,6 +59,7 @@ def atomicWriteJson(filePath, payload):
 		suffix='.tmp',
 	)
 	try:
+		applyCreationMode(fileDescriptor)
 		with os.fdopen(fileDescriptor, 'w', encoding='utf-8') as fileHandle:
 			json.dump(payload, fileHandle, ensure_ascii=False, indent=2)
 			fileHandle.write('\n')
@@ -75,6 +86,7 @@ def atomicWriteNdjson(filePath, records):
 	)
 	count = 0
 	try:
+		applyCreationMode(fileDescriptor)
 		with os.fdopen(fileDescriptor, 'w', encoding='utf-8') as fileHandle:
 			for record in records:
 				fileHandle.write(json.dumps(record, ensure_ascii=False, separators=(',', ':')))
@@ -166,6 +178,7 @@ class AsmiraConfig:
 	runsDir: Path
 	exportDir: Path
 	picturesDir: Path
+	stateDir: Path
 	retentionDays: int
 	subfinderPath: Path | None
 	amassPath: Path | None
@@ -217,7 +230,7 @@ def loadConfig(filePath=DEFAULT_CONFIG_PATH):
 		dnsTimeout=dnsTimeout,
 		wildcardSamples=getPositiveInt(parser, 'discovery', 'wildcard_samples', 2),
 		maxPages=getPositiveInt(parser, 'discovery', 'max_pages', 1000),
-		shodanHistory=parser.getboolean('discovery', 'shodan_history', fallback=True),
+		shodanHistory=parser.getboolean('discovery', 'shodan_history', fallback=False),
 		activeEnabled=parser.getboolean('active_scan', 'enabled', fallback=False),
 		activeAuthorized=parser.getboolean('active_scan', 'authorized', fallback=False),
 		endpointWorkers=getPositiveInt(parser, 'active_scan', 'endpoint_workers', 4),
@@ -230,6 +243,7 @@ def loadConfig(filePath=DEFAULT_CONFIG_PATH):
 		runsDir=Path(parser.get('storage', 'runs_dir', fallback='/var/lib/asmira/runs')),
 		exportDir=Path(parser.get('storage', 'export_dir', fallback='/var/lib/asmira/export')),
 		picturesDir=Path(parser.get('storage', 'pictures_dir', fallback='/var/lib/asmira/pictures')),
+		stateDir=Path(parser.get('storage', 'state_dir', fallback='/var/lib/asmira/state')),
 		retentionDays=getPositiveInt(parser, 'storage', 'retention_days', 14),
 		subfinderPath=optionalPath(parser, 'tools', 'subfinder'),
 		amassPath=optionalPath(parser, 'tools', 'amass'),

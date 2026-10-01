@@ -1,6 +1,8 @@
 import json
 from pathlib import Path
 
+import pytest
+
 import asmiraCommon
 import elastic.setup as elasticSetup
 
@@ -289,6 +291,35 @@ def testElasticSetupUpdatesExistingExposureMappings():
 			],
 		}},
 	}
+
+
+@pytest.mark.parametrize('legacyExists', [True, False])
+def testElasticSetupRemovesLegacyExposureLatest(legacyExists):
+	class FakeClient:
+		def __init__(self):
+			self.calls = []
+
+		def request(self, method, path, payload=None, allowedStatuses=()):
+			self.calls.append((method, path))
+			if method == 'GET' and path == '_transform/asmira-exposure-latest' and legacyExists:
+				return({'count': 1})
+			if method == 'GET':
+				return({'status': 404})
+			return({})
+
+	client = FakeClient()
+	elasticSetup.configureElasticsearch(client, 180)
+
+	legacyCalls = [call for call in client.calls if 'asmira-exposure-latest' in call[1]]
+	expected = [('GET', '_transform/asmira-exposure-latest')]
+	if legacyExists:
+		expected += [
+			('POST', '_transform/asmira-exposure-latest/_stop?wait_for_completion=true'),
+			('DELETE', '_transform/asmira-exposure-latest'),
+		]
+	expected.append(('DELETE', 'asmira-exposure-latest'))
+	assert legacyCalls == expected
+	assert client.calls.index(('POST', '_aliases')) < client.calls.index(expected[0])
 
 
 def testKibanaSetupCreatesCertificateDataViewAndPrefixedDashboard():

@@ -1,0 +1,724 @@
+<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#faf9f5;color:#141413}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
+<title>Carte fonctionnelle Asmira</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans+Condensed:wght@500;600&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;1,400&display=swap">
+<style>
+:root {
+	--bg: #f3f5f4;
+	--surface: #ffffff;
+	--ink: #172022;
+	--muted: #5a6a6c;
+	--rule: #cfd8d7;
+	--disc: #1f6b57;
+	--carto: #9a5310;
+	--exp: #3b4c9b;
+	--ctl: #6b5b8a;
+	--hot: #b42318;
+	--sans: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+	--mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+	--display: "IBM Plex Sans Condensed", "IBM Plex Sans", system-ui, sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+	:root:not([data-theme="light"]) {
+		color-scheme: dark;
+		--bg: #0f1516;
+		--surface: #172022;
+		--ink: #e2eae8;
+		--muted: #93a5a6;
+		--rule: #2c3a3c;
+		--disc: #62c3a5;
+		--carto: #e5a15a;
+		--exp: #9daaf2;
+		--ctl: #b7a6d8;
+		--hot: #ff7a66;
+	}
+}
+:root[data-theme="dark"] {
+	color-scheme: dark;
+	--bg: #0f1516;
+	--surface: #172022;
+	--ink: #e2eae8;
+	--muted: #93a5a6;
+	--rule: #2c3a3c;
+	--disc: #62c3a5;
+	--carto: #e5a15a;
+	--exp: #9daaf2;
+	--ctl: #b7a6d8;
+	--hot: #ff7a66;
+}
+
+body {
+	background: var(--bg);
+	color: var(--ink);
+	font-family: var(--sans);
+	font-size: 15px;
+	line-height: 1.6;
+	padding: 0 20px;
+}
+.wrap { max-width: 1080px; margin: 0 auto; padding-block: 40px 72px; }
+header { max-width: 68ch; display: grid; gap: 10px; }
+.eyebrow {
+	font-family: var(--mono);
+	font-size: 12px;
+	letter-spacing: 0.04em;
+	color: var(--muted);
+}
+h1, h2, h3 { font-family: var(--display); font-weight: 600; text-wrap: balance; line-height: 1.2; margin: 0; }
+h1 { font-size: clamp(30px, 4vw, 40px); }
+h2 { font-size: 24px; display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+h2 .file { font-family: var(--mono); font-size: 14px; font-weight: 500; color: var(--muted); }
+h3 { font-size: 16px; font-weight: 600; margin-top: 8px; }
+p { margin: 0; max-width: 68ch; }
+code, .mono { font-family: var(--mono); font-size: 0.9em; }
+
+section { margin-top: 56px; display: grid; gap: 18px; }
+section > .lede { color: var(--muted); }
+.stage-disc h2 { color: var(--disc); }
+.stage-carto h2 { color: var(--carto); }
+.stage-exp h2 { color: var(--exp); }
+
+figure {
+	margin: 0;
+	background: var(--surface);
+	border: 1px solid var(--rule);
+	border-radius: 6px;
+	padding: 16px;
+	display: grid;
+	gap: 12px;
+}
+.scroll { overflow-x: auto; }
+figure svg { display: block; width: 100%; min-width: 760px; height: auto; color: var(--muted); }
+figcaption { font-size: 13.5px; color: var(--muted); max-width: 90ch; }
+figcaption b { color: var(--ink); font-weight: 600; }
+
+/* SVG */
+svg text { font-family: var(--sans); font-size: 11px; fill: var(--ink); }
+svg .m { font-family: var(--mono); font-size: 11px; font-weight: 600; }
+svg .ms { font-family: var(--mono); font-size: 10px; fill: var(--muted); }
+svg .s { font-size: 10.5px; fill: var(--muted); }
+svg .k { font-size: 9.5px; letter-spacing: 0.08em; text-transform: uppercase; fill: var(--muted); }
+svg .lbl { font-size: 10px; fill: var(--muted); font-style: italic; }
+svg .edge { stroke: currentColor; stroke-width: 1.3; fill: none; }
+svg .ctl { stroke: var(--ctl); stroke-width: 1.2; stroke-dasharray: 4 3; fill: none; }
+svg .ctl-t { fill: var(--ctl); font-size: 10px; font-style: italic; }
+svg .frame { fill: none; stroke: var(--rule); stroke-width: 1.2; stroke-dasharray: 5 4; }
+svg .box { fill: var(--surface); stroke: var(--rule); stroke-width: 1.2; }
+svg .opt { stroke-dasharray: 5 3; }
+svg .disc { fill: color-mix(in srgb, var(--disc) 9%, var(--surface)); stroke: var(--disc); }
+svg .carto { fill: color-mix(in srgb, var(--carto) 9%, var(--surface)); stroke: var(--carto); }
+svg .exp { fill: color-mix(in srgb, var(--exp) 9%, var(--surface)); stroke: var(--exp); }
+svg .sys { fill: color-mix(in srgb, var(--muted) 8%, var(--surface)); stroke: var(--muted); }
+svg .disc-t { fill: var(--disc); }
+svg .carto-t { fill: var(--carto); }
+svg .exp-t { fill: var(--exp); }
+svg .hot { fill: var(--hot); }
+
+/* Arbres d'appels */
+details {
+	background: var(--surface);
+	border: 1px solid var(--rule);
+	border-radius: 6px;
+}
+summary {
+	cursor: pointer;
+	padding: 12px 16px;
+	font-weight: 600;
+	font-family: var(--display);
+	font-size: 15px;
+	list-style-position: outside;
+}
+summary:focus-visible, a:focus-visible { outline: 2px solid var(--exp); outline-offset: 2px; }
+details[open] summary { border-bottom: 1px solid var(--rule); }
+.tree-wrap { padding: 12px 16px 16px; overflow-x: auto; }
+ul.tree, ul.tree ul { list-style: none; margin: 0; padding: 0; }
+ul.tree ul { margin-left: 10px; padding-left: 18px; border-left: 1px solid var(--rule); }
+ul.tree li { padding: 5px 0; display: grid; grid-template-columns: minmax(0, 24ch) minmax(0, 1fr); column-gap: 16px; }
+ul.tree li > ul { grid-column: 1 / -1; }
+ul.tree .fn { font-family: var(--mono); font-size: 13px; font-weight: 500; overflow-wrap: anywhere; }
+ul.tree .d { font-size: 14px; color: var(--muted); }
+.stage-disc .fn { color: var(--disc); }
+.stage-carto .fn { color: var(--carto); }
+.stage-exp .fn { color: var(--exp); }
+ul.tree .fn.x { color: var(--ink); }
+.tag {
+	display: inline-block;
+	font-family: var(--mono);
+	font-size: 11px;
+	padding: 0 6px;
+	border-radius: 3px;
+	border: 1px solid var(--rule);
+	color: var(--muted);
+	margin-left: 4px;
+	vertical-align: 1px;
+}
+.tag.sub { color: var(--hot); border-color: color-mix(in srgb, var(--hot) 40%, var(--rule)); }
+.tag.new { color: var(--disc); border-color: color-mix(in srgb, var(--disc) 40%, var(--rule)); }
+
+/* Tableaux */
+.table-wrap { overflow-x: auto; background: var(--surface); border: 1px solid var(--rule); border-radius: 6px; }
+table { border-collapse: collapse; width: 100%; font-size: 14px; }
+th, td { text-align: left; padding: 9px 14px; border-bottom: 1px solid var(--rule); vertical-align: top; }
+tr:last-child td { border-bottom: 0; }
+th { font-family: var(--display); font-weight: 600; font-size: 13px; color: var(--muted); letter-spacing: 0.02em; }
+td code { white-space: nowrap; }
+
+.rules { display: grid; gap: 10px; margin: 0; padding: 0; list-style: none; }
+.rules li { padding-left: 18px; position: relative; max-width: 90ch; }
+.rules li::before { content: ""; position: absolute; left: 2px; top: 0.65em; width: 7px; height: 7px; border-radius: 50%; background: var(--muted); }
+
+@media (max-width: 640px) {
+	body { padding: 0 16px; }
+	ul.tree li { grid-template-columns: 1fr; }
+	ul.tree .d { font-size: 13.5px; }
+}
+</style>
+
+<div class="wrap">
+<header>
+	<div class="eyebrow">archoad/ASMIRA · main @ fef1f76 + budget Shodan DNS (non commité) · 30 sept. 2026</div>
+	<h1>Carte fonctionnelle Asmira</h1>
+	<p>Comment un run hebdomadaire traverse les quatre scripts Python : qui appelle quoi, dans quel ordre, en parallèle ou non, et quels fichiers chaque étape laisse derrière elle. Les noms de fonctions sont ceux du code ; le graphe d’appels a été extrait de l’AST puis vérifié à la lecture.</p>
+</header>
+
+<!-- ================= VUE D'ENSEMBLE ================= -->
+<section>
+	<h2>Vue d’ensemble</h2>
+	<figure>
+		<div class="scroll">
+		<svg viewBox="0 0 1040 260" role="img" aria-label="Le timer lance asmira.py, dont run() appelle en séquence la découverte fqdnCollect, la cartographie webTLS puis la construction des événements, qui aboutissent à trois fichiers NDJSON lus par Elastic Agent.">
+			<defs>
+				<marker id="ao" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker>
+				<marker id="aoc" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--ctl)"/></marker>
+			</defs>
+
+			<!-- rail de contrôle -->
+			<path class="ctl" d="M250,56 V26 H790 V52"/>
+			<path class="ctl" d="M430,26 V52" marker-end="url(#aoc)"/>
+			<path class="ctl" d="M610,26 V52" marker-end="url(#aoc)"/>
+			<path class="ctl" d="M790,40 V52" marker-end="url(#aoc)"/>
+			<text class="ctl-t" x="520" y="18" text-anchor="middle">run() appelle chaque étape en séquence</text>
+
+			<!-- boîtes -->
+			<rect class="box sys" x="10" y="56" width="120" height="78" rx="4"/>
+			<text class="k" x="70" y="76" text-anchor="middle">systemd</text>
+			<text class="m" x="70" y="96" text-anchor="middle">asmira.timer</text>
+			<text class="s" x="70" y="114" text-anchor="middle">lundi 20:00</text>
+			<text class="s" x="70" y="127" text-anchor="middle">+ 0 à 30 min</text>
+
+			<rect class="box exp" x="190" y="56" width="120" height="78" rx="4"/>
+			<text class="k" x="250" y="76" text-anchor="middle">asmira.py</text>
+			<text class="m" x="250" y="96" text-anchor="middle">main() → run()</text>
+			<text class="s" x="250" y="114" text-anchor="middle">loadConfig, run-id,</text>
+			<text class="s" x="250" y="127" text-anchor="middle">validation périmètre</text>
+
+			<rect class="box disc" x="370" y="56" width="120" height="78" rx="4"/>
+			<text class="k" x="430" y="76" text-anchor="middle">fqdnCollect.py</text>
+			<text class="m" x="430" y="96" text-anchor="middle">hostCartography()</text>
+			<text class="s" x="430" y="114" text-anchor="middle">découverte passive</text>
+			<text class="s" x="430" y="127" text-anchor="middle">+ validation DNS</text>
+
+			<rect class="box carto" x="550" y="56" width="120" height="78" rx="4"/>
+			<text class="k" x="610" y="76" text-anchor="middle">webTLS.py</text>
+			<text class="m" x="610" y="96" text-anchor="middle">tlsCartography()</text>
+			<text class="s" x="610" y="114" text-anchor="middle">scan actif par</text>
+			<text class="s" x="610" y="127" text-anchor="middle">couple FQDN/IP</text>
+
+			<rect class="box exp" x="730" y="56" width="120" height="78" rx="4"/>
+			<text class="k" x="790" y="76" text-anchor="middle">asmira.py</text>
+			<text class="m" x="790" y="96" text-anchor="middle">build*Events()</text>
+			<text class="s" x="790" y="114" text-anchor="middle">1 événement / FQDN,</text>
+			<text class="s" x="790" y="127" text-anchor="middle">diff avec le run d’avant</text>
+
+			<rect class="box sys" x="910" y="56" width="120" height="78" rx="4"/>
+			<text class="k" x="970" y="76" text-anchor="middle">srv</text>
+			<text class="m" x="970" y="96" text-anchor="middle">Elastic Agent</text>
+			<text class="s" x="970" y="114" text-anchor="middle">Filestream →</text>
+			<text class="s" x="970" y="127" text-anchor="middle">transforms latest</text>
+
+			<!-- flux de données -->
+			<line class="edge" x1="130" y1="95" x2="188" y2="95" marker-end="url(#ao)"/>
+			<text class="lbl" x="160" y="88" text-anchor="middle">déclenche</text>
+			<line class="edge" x1="310" y1="104" x2="368" y2="104" marker-end="url(#ao)"/>
+			<text class="lbl" x="340" y="97" text-anchor="middle">domaines</text>
+			<line class="edge" x1="490" y1="95" x2="548" y2="95" marker-end="url(#ao)"/>
+			<text class="lbl" x="520" y="88" text-anchor="middle">hosts_list</text>
+			<line class="edge" x1="670" y1="95" x2="728" y2="95" marker-end="url(#ao)"/>
+			<text class="lbl" x="700" y="88" text-anchor="middle">output[]</text>
+			<line class="edge" x1="850" y1="95" x2="908" y2="95" marker-end="url(#ao)"/>
+			<text class="lbl" x="880" y="88" text-anchor="middle">3 NDJSON</text>
+			<!-- découverte → événements découverte -->
+			<path class="edge" d="M430,134 V232 H760 V136" marker-end="url(#ao)" stroke-dasharray="2 3"/>
+			<text class="lbl" x="595" y="226" text-anchor="middle">résultat de découverte (candidats, inventaire, rapports de source)</text>
+
+			<!-- fichiers produits -->
+			<text class="k" x="378" y="156">runs/&lt;id&gt;/</text>
+			<text class="ms" x="378" y="172">hosts_candidates.json</text>
+			<text class="ms" x="378" y="186">hosts_inventory.json</text>
+			<text class="ms" x="378" y="200">hosts_list.json</text>
+			<text class="ms" x="378" y="214">collection_report.json</text>
+
+			<text class="k" x="558" y="156">runs/&lt;id&gt;/</text>
+			<text class="ms" x="558" y="172">list_ip.json</text>
+			<text class="ms" x="558" y="186">hosts_analyse.json</text>
+			<text class="ms" x="558" y="200">…checkpoint.json</text>
+
+			<text class="k" x="800" y="156">export/</text>
+			<text class="ms" x="800" y="172">asmira_discovery_*</text>
+			<text class="ms" x="800" y="186">asmira_exposure_*</text>
+			<text class="ms" x="800" y="200">asmira_run_*</text>
+		</svg>
+		</div>
+		<figcaption><b>Deux lectures superposées.</b> Les flèches pleines portent les données d’une étape à la suivante ; le rail pointillé violet montre que c’est <code>run()</code> qui appelle chaque étape, les modules ne s’appellent pas entre eux. La découverte est exportée dès sa fin, avant le scan actif : un échec de cartographie laisse quand même <code>asmira_discovery_*</code> et, grâce au <code>finally</code>, toujours <code>asmira_run_*</code>. Les fichiers de travail vivent sous <code>/var/lib/asmira/runs/&lt;run-id&gt;/</code>, les exports sous <code>/var/lib/asmira/export/</code>.</figcaption>
+	</figure>
+
+	<details open>
+		<summary>asmira.py — orchestration (<code>main</code> → <code>run</code>)</summary>
+		<div class="tree-wrap stage-exp">
+		<ul class="tree">
+			<li><span class="fn">main(argv)</span><span class="d">Point d’entrée du service systemd. Parse <code>--config</code>, <code>--run-id</code>, <code>--max-endpoints</code>, <code>--discovery-only</code>, <code>--validate-config</code>.</span>
+				<ul>
+					<li><span class="fn x">loadConfig()</span><span class="d">asmiraCommon — lit <code>/etc/asmira/asmira.conf</code>, refuse tout secret dans le fichier.</span></li>
+					<li><span class="fn">validateConfigScope()</span><span class="d">Chaque cible doit être un domaine enregistré (pas un sous-domaine) ; sources connues ; Amass seulement via <code>enable_amass</code>.</span></li>
+					<li><span class="fn">run(config)</span><span class="d">Crée le run-id UTC et <code>runs/&lt;id&gt;/</code>, puis enchaîne :</span>
+						<ul>
+							<li><span class="fn x">fqdnCollect.hostCartography()</span><span class="d">Étape 1 — découverte.</span></li>
+							<li><span class="fn">buildDiscoveryEvents()</span><span class="d">Un événement par candidat (DNS, sources, wildcard) → <code>asmira_discovery_&lt;id&gt;.ndjson</code>.</span></li>
+							<li><span class="fn x">webTLS.configureTools() · testTools()</span><span class="d">Chemins netcat / nmap / openssl, vérifiés avant tout scan. Exige <code>[active_scan] authorized = true</code>.</span></li>
+							<li><span class="fn x">webTLS.tlsCartography()</span><span class="d">Étape 2 — cartographie active sur <code>hosts_list.json</code>.</span></li>
+							<li><span class="fn">findPreviousExposureEvents()</span><span class="d">Relit les <code>asmira_exposure_*</code> précédents : dernier état connu par FQDN.</span></li>
+							<li><span class="fn">buildExposureEvents()</span><span class="d">Étape 3 — consolidation par FQDN et comparaison → <code>asmira_exposure_&lt;id&gt;.ndjson</code>.</span></li>
+							<li><span class="fn">buildRunEvent()</span><span class="d">Dans le <code>finally</code> : statut, <code>partial</code>, <code>coverage_reasons</code>, compteurs → <code>asmira_run_&lt;id&gt;.ndjson</code>.</span></li>
+							<li><span class="fn">cleanExports()</span><span class="d">Supprime les NDJSON plus vieux que <code>retention_days</code>.</span></li>
+						</ul>
+					</li>
+				</ul>
+			</li>
+		</ul>
+		</div>
+	</details>
+</section>
+
+<!-- ================= DÉCOUVERTE ================= -->
+<section class="stage-disc">
+	<h2>1 · Découverte <span class="file">fqdnCollect.py · hostCartography()</span></h2>
+	<p class="lede">Passive, sauf Amass. Transforme une liste de domaines en FQDN explicites qui résolvent aujourd’hui, en gardant la trace de quelle source a vu quoi.</p>
+	<figure>
+		<div class="scroll">
+		<svg viewBox="0 0 1040 290" role="img" aria-label="Chaque domaine est envoyé à toutes les sources en parallèle ; les Finding sont dédoublonnés, puis validés par DNS avec détection des zones wildcard, pour produire hosts_list.">
+			<defs>
+				<marker id="ad" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker>
+			</defs>
+
+			<rect class="box disc" x="10" y="124" width="150" height="62" rx="4"/>
+			<text class="m disc-t" x="85" y="148" text-anchor="middle">extractListDomains()</text>
+			<text class="s" x="85" y="166" text-anchor="middle">domaines enregistrés</text>
+			<text class="s" x="85" y="179" text-anchor="middle">(tldextract)</text>
+
+			<rect class="frame" x="200" y="6" width="250" height="276" rx="6"/>
+			<text class="k" x="214" y="24">collectFindings() · ThreadPool 4</text>
+			<text class="s" x="214" y="38">prepare() puis runCollector() par domaine</text>
+
+			<rect class="box disc" x="214" y="50" width="222" height="40" rx="3"/>
+			<text class="m" x="226" y="67">shodan-ctl</text>
+			<text class="s" x="226" y="82">logs CT Shodan, sans clé</text>
+
+			<rect class="box disc" x="214" y="96" width="222" height="40" rx="3"/>
+			<text class="m" x="226" y="113">subfinder</text>
+			<text class="s" x="226" y="128">binaire externe, -all, JSONL</text>
+
+			<rect class="box disc" x="214" y="142" width="222" height="40" rx="3"/>
+			<text class="m" x="226" y="159">shodan-dns</text>
+			<text class="s" x="226" y="174">API payante · budget de crédits</text>
+			<circle class="hot" cx="424" cy="155" r="4"/>
+
+			<rect class="box disc" x="214" y="188" width="222" height="40" rx="3"/>
+			<text class="m" x="226" y="205">certspotter</text>
+			<text class="s" x="226" y="220">émissions de certificats, paginé</text>
+
+			<rect class="box disc opt" x="214" y="234" width="222" height="40" rx="3"/>
+			<text class="m" x="226" y="251">amass</text>
+			<text class="s" x="226" y="266">actif + brute-force, optionnel</text>
+
+			<!-- fan-out -->
+			<g class="edge">
+				<path class="edge" d="M160,155 L212,70" marker-end="url(#ad)"/>
+				<path class="edge" d="M160,155 L212,116" marker-end="url(#ad)"/>
+				<path class="edge" d="M160,155 L212,162" marker-end="url(#ad)"/>
+				<path class="edge" d="M160,155 L212,208" marker-end="url(#ad)"/>
+				<path class="edge" d="M160,155 L212,254" marker-end="url(#ad)" stroke-dasharray="4 3"/>
+			</g>
+			<!-- fan-in -->
+			<path class="edge" d="M436,70 L498,150"/>
+			<path class="edge" d="M436,116 L498,152"/>
+			<path class="edge" d="M436,162 L498,155"/>
+			<path class="edge" d="M436,208 L498,158"/>
+			<path class="edge" d="M436,254 L498,160" stroke-dasharray="4 3"/>
+			<line class="edge" x1="498" y1="155" x2="518" y2="155" marker-end="url(#ad)"/>
+			<text class="lbl" x="472" y="104" text-anchor="middle">Finding[]</text>
+
+			<rect class="box disc" x="520" y="120" width="160" height="70" rx="4"/>
+			<text class="m disc-t" x="600" y="142" text-anchor="middle">buildCandidateRecords()</text>
+			<text class="s" x="600" y="160" text-anchor="middle">dédoublonne par nom,</text>
+			<text class="s" x="600" y="173" text-anchor="middle">fusionne sources + preuves</text>
+
+			<line class="edge" x1="680" y1="155" x2="718" y2="155" marker-end="url(#ad)"/>
+			<text class="lbl" x="699" y="147" text-anchor="middle">candidats</text>
+
+			<rect class="frame" x="720" y="62" width="190" height="186" rx="6"/>
+			<text class="m disc-t" x="734" y="82">resolveCandidateHosts()</text>
+			<rect class="box" x="734" y="94" width="162" height="62" rx="3"/>
+			<text class="m" x="746" y="113">DnsValidator</text>
+			<text class="m" x="746" y="127">.resolveHost()</text>
+			<text class="s" x="746" y="146">A · AAAA · CNAME, 20 threads</text>
+			<rect class="box" x="734" y="166" width="162" height="68" rx="3"/>
+			<text class="m" x="746" y="185">detectWildcardZone()</text>
+			<text class="s" x="746" y="203">2 labels aléatoires par</text>
+			<text class="s" x="746" y="216">zone parente : réponse</text>
+			<text class="s" x="746" y="229">stable = wildcard</text>
+
+			<line class="edge" x1="910" y1="155" x2="938" y2="155" marker-end="url(#ad)"/>
+
+			<rect class="box disc" x="940" y="104" width="90" height="102" rx="4"/>
+			<text class="k" x="985" y="122" text-anchor="middle">écrit</text>
+			<text class="ms" x="985" y="142" text-anchor="middle">candidates</text>
+			<text class="ms" x="985" y="158" text-anchor="middle">inventory</text>
+			<text class="ms" x="985" y="174" text-anchor="middle" style="fill:var(--disc);font-weight:600">hosts_list</text>
+			<text class="s" x="985" y="194" text-anchor="middle">résolus seuls</text>
+		</svg>
+		</div>
+		<figcaption><b>Toutes les sources voient tous les domaines, en parallèle, et chaque défaillance reste isolée</b> : <code>runCollector()</code> transforme une exception en rapport <code>failed</code>, une indisponibilité (clé absente, binaire manquant, crédits à 0) en <code>skipped</code>. Tout statut autre que <code>success</code> rendra le run <code>partial</code>. Un <code>*.example.com</code> reste un indice wildcard et n’entre jamais dans <code>hosts_list</code>. <span style="color:var(--hot)">●</span> shodan-dns interroge d’abord <code>/api-info</code> et répartit les crédits restants entre domaines.</figcaption>
+	</figure>
+
+	<details>
+		<summary>Arbre d’appels — fqdnCollect.py</summary>
+		<div class="tree-wrap">
+		<ul class="tree">
+			<li><span class="fn">hostCartography()</span><span class="d">Orchestre la découverte et écrit les 5 fichiers datés du run.</span>
+				<ul>
+					<li><span class="fn">extractListDomains()</span><span class="d">Normalise chaque entrée (<code>extractHostFromRow</code>, <code>normalizeHost</code> : IDNA, labels, pas d’IP) et en tire le domaine enregistré via <code>extractDomain</code>. Écrit <code>domains_list.json</code>.</span></li>
+					<li><span class="fn">buildCollectors()</span><span class="d">Instancie un collecteur par source configurée ; les clés viennent de l’environnement (<code>SHODAN_API_KEY</code>, <code>CERTSPOTTER_API_KEY</code>).</span></li>
+					<li><span class="fn">collectFindings()</span><span class="d">Ajoute chaque domaine comme <code>seed</code>, appelle <code>prepare(domains)</code> sur chaque collecteur, puis exécute toutes les paires (source, domaine) dans un pool de <code>collector_workers</code> threads.</span>
+						<ul>
+							<li><span class="fn">runCollector()</span><span class="d"><code>availability()</code> → <code>collect(domain)</code> ; convertit tout en rapport <code>success / failed / skipped</code> avec durée, secrets masqués par <code>redactSecrets()</code>. Garde les résultats partiels levés par <code>IncompleteCollectionError</code>. <span class="tag new">nouveau</span></span></li>
+							<li><span class="fn">ShodanCtlCollector.collect</span><span class="d">GET <code>ctl.shodan.io/…/hostnames</code> → liste de noms.</span></li>
+							<li><span class="fn">SubfinderCollector.collect</span><span class="d">Lance <code>subfinder -d … -all -oJ</code> avec délai, lit le JSONL ; la source devient <code>subfinder:&lt;fournisseur&gt;</code>.</span></li>
+							<li><span class="fn">ShodanDnsCollector.prepare</span><span class="d"><code>/api-info</code> (gratuit) → <code>query_credits</code> répartis équitablement entre domaines. <span class="tag new">nouveau</span></span></li>
+							<li><span class="fn">ShodanDnsCollector.collect</span><span class="d">Pagine <code>/dns/domain/&lt;d&gt;</code> ; chaque page réserve un crédit (<code>reserveCredit</code>), le reliquat est rendu au pot commun (<code>releaseCredits</code>). Erreurs Shodan journalisées avec leur vrai message (<code>shodanErrorMessage</code>). <span class="tag new">nouveau</span></span></li>
+							<li><span class="fn">CertSpotterCollector.collect</span><span class="d">Pagine <code>/v1/issuances</code> avec <code>after</code> ; garde id, dates et SHA-256 du certificat comme preuve.</span></li>
+							<li><span class="fn">AmassCollector.collect</span><span class="d"><code>amass enum -active -brute</code> puis <code>amass subs</code> ; seulement si <code>enable_amass</code>.</span></li>
+							<li><span class="fn">appendFinding() → createFinding()</span><span class="d">Normalise le nom, garde le préfixe wildcard, rejette ce qui sort du périmètre du domaine (avertissement, pas d’échec).</span></li>
+						</ul>
+					</li>
+					<li><span class="fn">buildCandidateRecords()</span><span class="d">Regroupe par (domaine, nom, wildcard), fusionne les sources et dédoublonne les preuves. Écrit <code>hosts_candidates.json</code>.</span></li>
+					<li><span class="fn">resolveCandidateHosts()</span><span class="d">Valide l’état DNS courant de chaque nom explicite.</span>
+						<ul>
+							<li><span class="fn">DnsValidator.resolveHost()</span><span class="d">A, AAAA, CNAME avec TTL ; statut <code>NOERROR / NXDOMAIN / ERROR</code>. Pool de <code>dns_workers</code>.</span></li>
+							<li><span class="fn">getWildcardZones() → getParentZones()</span><span class="d">Toutes les zones parentes des noms trouvés, plus les motifs <code>*.</code> observés.</span></li>
+							<li><span class="fn">detectWildcardZone()</span><span class="d">Résout <code>fqdncollect-&lt;uuid&gt;.zone</code> ; si tous les échantillons répondent, la zone est wildcard. <code>dnsSignature()</code> compare ensuite les réponses d’un hôte à celles du wildcard.</span></li>
+						</ul>
+					</li>
+					<li><span class="fn">writeJson / writeJsonRecords</span><span class="d">Écritures atomiques : <code>hosts_inventory.json</code>, <code>hosts_list.json</code> (noms explicites résolus), <code>collection_report.json</code>.</span></li>
+				</ul>
+			</li>
+		</ul>
+		</div>
+	</details>
+</section>
+
+<!-- ================= CARTOGRAPHIE ================= -->
+<section class="stage-carto">
+	<h2>2 · Cartographie active <span class="file">webTLS.py · tlsCartography()</span></h2>
+	<p class="lede">Deux temps : construire la liste des couples FQDN/IP enrichis une fois par IP, puis analyser chaque couple indépendamment, avec reprise sur checkpoint.</p>
+	<figure>
+		<div class="scroll">
+		<svg viewBox="0 0 1040 350" role="img" aria-label="buildListIps enrichit les domaines, résout les FQDN et scanne chaque IP unique ; tlsAnalyse distribue chaque couple FQDN/IP à analyseEndpoint, qui lance les sondes HTTP si le port 80 est ouvert et les sondes TLS si le port 443 est ouvert.">
+			<defs>
+				<marker id="ac" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker>
+			</defs>
+
+			<!-- buildListIps -->
+			<rect class="frame" x="10" y="6" width="252" height="336" rx="6"/>
+			<text class="m carto-t" x="24" y="28">buildListIps()</text>
+
+			<rect class="box carto" x="24" y="42" width="224" height="70" rx="3"/>
+			<text class="k" x="36" y="60">par domaine</text>
+			<text class="m" x="36" y="78">getNameServer · getDomainInfo</text>
+			<text class="s" x="36" y="96">serveurs NS + WHOIS (dates, registrar)</text>
+
+			<rect class="box carto" x="24" y="132" width="224" height="70" rx="3"/>
+			<text class="k" x="36" y="150">par FQDN · threads</text>
+			<text class="m" x="36" y="168">getIPs()</text>
+			<text class="s" x="36" y="186">toutes les adresses A et AAAA</text>
+
+			<rect class="box carto" x="24" y="222" width="224" height="80" rx="3"/>
+			<text class="k" x="36" y="240">par IP unique · threads</text>
+			<text class="m" x="36" y="258">getPorts()</text>
+			<circle class="hot" cx="112" cy="254" r="4"/>
+			<text class="s" x="36" y="276">nmap 22, 80, 443</text>
+			<text class="s" x="36" y="291">+ getGeoData (GeoIP) + testIPnet</text>
+
+			<line class="edge" x1="136" y1="112" x2="136" y2="130" marker-end="url(#ac)"/>
+			<line class="edge" x1="136" y1="202" x2="136" y2="220" marker-end="url(#ac)"/>
+			<text class="s" x="24" y="326">→ une ligne par couple FQDN/IP</text>
+
+			<line class="edge" x1="262" y1="176" x2="318" y2="176" marker-end="url(#ac)"/>
+			<text class="lbl" x="290" y="168" text-anchor="middle">list_ip</text>
+
+			<!-- tlsAnalyse -->
+			<rect class="box carto" x="320" y="112" width="180" height="128" rx="4"/>
+			<text class="m carto-t" x="334" y="134">tlsAnalyse()</text>
+			<text class="s" x="334" y="156">saute ce qui est déjà</text>
+			<text class="s" x="334" y="170">dans le checkpoint</text>
+			<text class="s" x="334" y="192">endpoint_workers threads</text>
+			<text class="s" x="334" y="214">checkpoint tous les</text>
+			<text class="s" x="334" y="228">checkpoint_every (25)</text>
+
+			<line class="edge" x1="500" y1="176" x2="546" y2="176" marker-end="url(#ac)"/>
+			<text class="lbl" x="523" y="168" text-anchor="middle">1 couple</text>
+
+			<!-- analyseEndpoint -->
+			<rect class="frame" x="548" y="6" width="482" height="336" rx="6"/>
+			<text class="m carto-t" x="562" y="28">analyseEndpoint(item)</text>
+
+			<text class="s" x="562" y="72">si port 80</text>
+			<text class="s" x="562" y="86">ouvert</text>
+			<line class="edge" x1="626" y1="72" x2="676" y2="72" marker-end="url(#ac)"/>
+
+			<rect class="box carto" x="678" y="44" width="340" height="52" rx="3"/>
+			<text class="m" x="690" y="64">getHTTPData()</text>
+			<circle class="hot" cx="793" cy="60" r="4"/>
+			<text class="s" x="690" y="84">reqNetcat « GET / » sur :80 → repli testShodan(ip)</text>
+
+			<text class="s" x="562" y="210">si port 443</text>
+			<text class="s" x="562" y="224">ouvert</text>
+			<path class="edge" d="M626,214 H652"/>
+			<path class="edge" d="M652,134 V316"/>
+			<line class="edge" x1="652" y1="134" x2="676" y2="134" marker-end="url(#ac)"/>
+			<line class="edge" x1="652" y1="194" x2="676" y2="194" marker-end="url(#ac)"/>
+			<line class="edge" x1="652" y1="254" x2="676" y2="254" marker-end="url(#ac)"/>
+			<line class="edge" x1="652" y1="314" x2="676" y2="314" marker-end="url(#ac)"/>
+
+			<rect class="box carto" x="678" y="110" width="340" height="48" rx="3"/>
+			<text class="m" x="690" y="130">getHTTPheadersHash()</text>
+			<text class="s" x="690" y="148">HHHash : empreinte de l’ordre des en-têtes HTTPS</text>
+
+			<rect class="box carto opt" x="678" y="170" width="340" height="48" rx="3"/>
+			<text class="m" x="690" y="190">getScreenShot()</text>
+			<text class="s" x="690" y="208">Selenium, seulement si capture_screenshots</text>
+
+			<rect class="box carto" x="678" y="230" width="340" height="48" rx="3"/>
+			<text class="m" x="690" y="250">testTLS()</text>
+			<circle class="hot" cx="761" cy="246" r="4"/>
+			<text class="s" x="690" y="268">openssl s_client → extractCertificateData → PQC</text>
+
+			<rect class="box carto" x="678" y="290" width="340" height="48" rx="3"/>
+			<text class="m" x="690" y="310">reqNmap()</text>
+			<circle class="hot" cx="761" cy="306" r="4"/>
+			<text class="s" x="690" y="328">ssl-enum-ciphers → repli testAllCipherSuites</text>
+		</svg>
+		</div>
+		<figcaption><b>Le coût est borné à deux niveaux.</b> Les threads (<code>endpoint_workers</code>) fixent combien de couples sont analysés à la fois ; le sémaphore <code>subprocess_budget</code>, pris par <code>commandSlot()</code>, fixe combien de <span style="color:var(--hot)">●</span> sous-processus nmap / openssl / netcat tournent réellement en même temps. Les ports ne sont scannés qu’une fois par IP, même si dix FQDN la partagent. Une exception dans une sonde marque le couple <code>scan_status = failed</code> sans arrêter le run. <code>getAllCipherSuites()</code> est appelé une seule fois au démarrage pour le repli de <code>reqNmap</code>.</figcaption>
+	</figure>
+
+	<details>
+		<summary>Arbre d’appels — webTLS.py</summary>
+		<div class="tree-wrap">
+		<ul class="tree">
+			<li><span class="fn">tlsCartography()</span><span class="d">Crée le sémaphore de sous-processus et enchaîne les deux temps ; renvoie <code>output[]</code> à <code>asmira.run()</code>.</span>
+				<ul>
+					<li><span class="fn">getAllCipherSuites()</span><span class="d"><code>openssl ciphers -v ALL:COMPLEMENTOFALL</code>, mis en cache dans <code>cipherList</code>. <span class="tag sub">sous-processus</span></span></li>
+					<li><span class="fn">extractListHosts()</span><span class="d">Lit <code>hosts_list.json</code> produit par la découverte.</span></li>
+					<li><span class="fn">buildListIps()</span><span class="d">Construit <code>list_ip.json</code>, une entrée par couple FQDN/IP, avec les caches par domaine et par IP.</span>
+						<ul>
+							<li><span class="fn">getNameServer()</span><span class="d">Enregistrements NS du domaine.</span></li>
+							<li><span class="fn">getDomainInfo() → queryWhois()</span><span class="d">WHOIS : dates de création/expiration, registrar ; valeurs « inconnues » si échec.</span></li>
+							<li><span class="fn">getIPs()</span><span class="d">A et AAAA, triés par <code>ipSortKey</code> (compatible IPv4/IPv6).</span></li>
+							<li><span class="fn">getPorts() → extractNmapPorts()</span><span class="d"><code>nmap -Pn -p22,80,443</code> par IP unique. <span class="tag sub">sous-processus</span></span></li>
+							<li><span class="fn">getGeoData()</span><span class="d">Pays, ville, ASN via les bases GeoIP locales (si présentes).</span></li>
+							<li><span class="fn">testIPnet()</span><span class="d">L’IP appartient-elle à <code>ASMIRA_INTERNAL_NETWORKS</code> ? → champ <code>pasi</code>.</span></li>
+						</ul>
+					</li>
+					<li><span class="fn">tlsAnalyse()</span><span class="d">Reprend le checkpoint, distribue les couples restants, écrit <code>hosts_analyse.json</code> (et le XLSX via <code>dfToExcel</code> si activé).</span>
+						<ul>
+							<li><span class="fn">analyseEndpoint()</span><span class="d">Toutes les sondes d’un couple, conditionnées par les ports ouverts ; horodate <code>observed_at</code> et mesure la durée.</span>
+								<ul>
+									<li><span class="fn">getHTTPData() → reqNetcat()</span><span class="d">Requête HTTP/1.0 brute : code, raison, en-tête <code>Server</code>. <span class="tag sub">sous-processus</span></span></li>
+									<li><span class="fn">testShodan() → extractShodanData()</span><span class="d">Repli si le port 80 ne répond pas : données HTTP que Shodan connaît pour l’IP (<code>http_source = shodan</code>). Échecs silencieux.</span></li>
+									<li><span class="fn">getHTTPheadersHash()</span><span class="d">GET HTTPS sans vérification ; SHA-256 de la liste ordonnée des en-têtes.</span></li>
+									<li><span class="fn">getScreenShot()</span><span class="d">Capture Selenium ; désactivée en production.</span></li>
+									<li><span class="fn">testTLS() → extractTLSdata()</span><span class="d"><code>openssl s_client</code> avec SNI et vérification : version et suite négociées, chaîne. <span class="tag sub">sous-processus</span></span></li>
+									<li><span class="fn">extractCertificateData()</span><span class="d">Sujet, émetteur, validité, SAN, empreinte SHA-256, auto-signé ou non.</span></li>
+									<li><span class="fn">classifyCertificatePqc()</span><span class="d">Classe les OID de clé et de signature : <code>pqc / hybrid / partial / classical / unknown</code>.</span></li>
+									<li><span class="fn">reqNmap() → extractNmapCipher()</span><span class="d"><code>nmap --script ssl-enum-ciphers</code> : suites acceptées par version TLS. <span class="tag sub">sous-processus</span></span></li>
+									<li><span class="fn">testAllCipherSuites() → testOneCipherSuite()</span><span class="d">Repli si nmap ne rend rien : une tentative openssl par suite, en parallèle. <span class="tag sub">sous-processus</span></span></li>
+								</ul>
+							</li>
+						</ul>
+					</li>
+					<li><span class="fn">computeGraphs()</span><span class="d">Graphiques matplotlib et carte ; désactivés en production.</span></li>
+				</ul>
+			</li>
+		</ul>
+		</div>
+	</details>
+</section>
+
+<!-- ================= EXPORTS ================= -->
+<section class="stage-exp">
+	<h2>3 · Consolidation et exports <span class="file">asmira.py</span></h2>
+	<p class="lede">Le scan travaille par couple FQDN/IP ; Elastic stocke une entité par FQDN. C’est ici que les observations sont regroupées et comparées au dernier état connu.</p>
+	<figure>
+		<div class="scroll">
+		<svg viewBox="0 0 1040 310" role="img" aria-label="Les résultats de découverte deviennent des événements de découverte ; les observations actives et les exports précédents alimentent buildExposureEvents, qui classe chaque FQDN ; buildRunEvent résume le run ; les trois fichiers NDJSON sont lus par Elastic Agent.">
+			<defs>
+				<marker id="ae" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker>
+			</defs>
+
+			<!-- entrées -->
+			<rect class="box disc" x="10" y="30" width="200" height="50" rx="4"/>
+			<text class="m" x="22" y="51">discoveryResult</text>
+			<text class="s" x="22" y="69">candidats + inventaire DNS</text>
+
+			<rect class="box carto" x="10" y="120" width="200" height="50" rx="4"/>
+			<text class="m" x="22" y="141">exposureResult.output[]</text>
+			<text class="s" x="22" y="159">1 item par couple FQDN/IP</text>
+
+			<rect class="box" x="10" y="200" width="200" height="50" rx="4"/>
+			<text class="m" x="22" y="221">exports précédents</text>
+			<text class="s" x="22" y="239">findPreviousExposureEvents()</text>
+
+			<!-- traitements -->
+			<rect class="box exp" x="280" y="30" width="240" height="50" rx="4"/>
+			<text class="m exp-t" x="292" y="51">buildDiscoveryEvents()</text>
+			<text class="s" x="292" y="69">1 événement par nom candidat</text>
+
+			<rect class="box exp" x="280" y="100" width="240" height="140" rx="4"/>
+			<text class="m exp-t" x="292" y="121">buildExposureEvents()</text>
+			<text class="s" x="292" y="141">regroupe les items par FQDN</text>
+			<text class="s" x="292" y="157">→ buildFqdnObservation() : IPs,</text>
+			<text class="s" x="292" y="171">   ports, certificats, statut PQC</text>
+			<text class="s" x="292" y="189">→ exposureState() vs état précédent</text>
+			<text class="m" x="292" y="210" style="font-weight:500">new · updated · unchanged</text>
+			<text class="m" x="292" y="226" style="font-weight:500">disappeared <tspan class="s" style="font-family:var(--sans)">(run complet seulement)</tspan></text>
+
+			<rect class="box exp" x="280" y="256" width="240" height="44" rx="4"/>
+			<text class="m exp-t" x="292" y="275">buildRunEvent()</text>
+			<text class="s" x="292" y="291">statut, partial, coverage_reasons</text>
+
+			<line class="edge" x1="210" y1="55" x2="278" y2="55" marker-end="url(#ae)"/>
+			<line class="edge" x1="210" y1="145" x2="278" y2="145" marker-end="url(#ae)"/>
+			<line class="edge" x1="210" y1="225" x2="278" y2="225" marker-end="url(#ae)"/>
+			<text class="lbl" x="244" y="217" text-anchor="middle">état connu</text>
+			<path class="edge" d="M110,80 V98 H250 V270 H278" marker-end="url(#ae)" stroke-dasharray="2 3"/>
+			<text class="lbl" x="244" y="290" text-anchor="middle">rapports</text>
+
+			<!-- sorties -->
+			<rect class="box" x="590" y="30" width="220" height="50" rx="4"/>
+			<text class="ms" x="602" y="51" style="fill:var(--ink)">asmira_discovery_&lt;id&gt;.ndjson</text>
+			<text class="s" x="602" y="69">écrit dès la fin de la découverte</text>
+
+			<rect class="box" x="590" y="145" width="220" height="50" rx="4"/>
+			<text class="ms" x="602" y="166" style="fill:var(--ink)">asmira_exposure_&lt;id&gt;.ndjson</text>
+			<text class="s" x="602" y="184">clé server.domain, IPs multivaluées</text>
+
+			<rect class="box" x="590" y="256" width="220" height="44" rx="4"/>
+			<text class="ms" x="602" y="275" style="fill:var(--ink)">asmira_run_&lt;id&gt;.ndjson</text>
+			<text class="s" x="602" y="291">toujours écrit (finally)</text>
+
+			<line class="edge" x1="520" y1="55" x2="588" y2="55" marker-end="url(#ae)"/>
+			<line class="edge" x1="520" y1="170" x2="588" y2="170" marker-end="url(#ae)"/>
+			<line class="edge" x1="520" y1="278" x2="588" y2="278" marker-end="url(#ae)"/>
+			<text class="lbl" x="554" y="162" text-anchor="middle">atomique</text>
+
+			<!-- Elastic -->
+			<rect class="box sys" x="870" y="110" width="160" height="120" rx="4"/>
+			<text class="m" x="882" y="132">Elastic Agent</text>
+			<text class="s" x="882" y="152">data streams</text>
+			<text class="ms" x="882" y="168">asmira.discovery</text>
+			<text class="ms" x="882" y="182">asmira.exposure</text>
+			<text class="ms" x="882" y="196">asmira.run</text>
+			<text class="s" x="882" y="216">→ transforms latest</text>
+
+			<line class="edge" x1="810" y1="55" x2="868" y2="130" marker-end="url(#ae)"/>
+			<line class="edge" x1="810" y1="170" x2="868" y2="170" marker-end="url(#ae)"/>
+			<line class="edge" x1="810" y1="278" x2="868" y2="212" marker-end="url(#ae)"/>
+			<text class="lbl" x="840" y="162" text-anchor="middle">Filestream</text>
+		</svg>
+		</div>
+		<figcaption><b>La boucle se ferme par les fichiers, pas par Elasticsearch</b> : le run suivant relit ses propres exports sur disque pour savoir ce qui a changé. Un FQDN absent n’est déclaré <code>disappeared</code> (tombstone <code>present=false</code>) que si le run est complet ; dès qu’une source n’est pas <code>success</code> ou que <code>max_endpoints</code> plafonne le scan, le run est <code>partial</code> et aucune disparition n’est émise.</figcaption>
+	</figure>
+
+	<details>
+		<summary>Arbre d’appels — construction des événements</summary>
+		<div class="tree-wrap">
+		<ul class="tree">
+			<li><span class="fn">buildDiscoveryEvents()</span><span class="d">Joint candidats et inventaire ; champs <code>dns.question.*</code>, adresses résolues, sources, indices wildcard.</span>
+				<ul><li><span class="fn">baseEvent() · stableId()</span><span class="d">Squelette ECS commun (<code>event.dataset</code>, <code>observer.hostname</code>…) et identifiants déterministes.</span></li></ul>
+			</li>
+			<li><span class="fn">findPreviousExposureEvents()</span><span class="d">Parcourt <code>asmira_exposure_*.ndjson</code> (hors run courant) via <code>readNdjson()</code> ; garde le dernier état par FQDN.</span></li>
+			<li><span class="fn">buildExposureEvents()</span><span class="d">Cœur du modèle entity-centric.</span>
+				<ul>
+					<li><span class="fn">previousItems()</span><span class="d">Récupère les observations brutes (<code>asmira.raw.endpoints</code>) d’un ancien événement.</span></li>
+					<li><span class="fn">buildFqdnObservation()</span><span class="d">Fusionne les couples d’un même FQDN : <code>server.ip</code> multivalué, ports, HTTP, TLS, certificats, PQC, WHOIS, géo ; <code>asmira.asset.id</code> dérivé du seul FQDN.</span></li>
+					<li><span class="fn">exposureState() → eventValues()</span><span class="d">État « matériel » comparable ; différent → <code>updated</code>, avec <code>certificate_changed</code> / <code>pqc_status_changed</code> et valeurs précédentes.</span></li>
+				</ul>
+			</li>
+			<li><span class="fn">buildRunEvent()</span><span class="d">Statut, durée, compteurs (FQDN, hôtes résolus, disparitions), <code>failed_sources</code> / <code>skipped_sources</code>, <code>partial</code> et ses raisons.</span></li>
+			<li><span class="fn x">atomicWriteNdjson()</span><span class="d">asmiraCommon — écriture temporaire puis renommage : Filestream ne lit jamais un fichier à moitié écrit.</span></li>
+		</ul>
+		</div>
+	</details>
+</section>
+
+<!-- ================= SOCLE ================= -->
+<section>
+	<h2>Socle commun <span class="file">asmiraCommon.py</span></h2>
+	<div class="table-wrap">
+	<table>
+		<thead><tr><th>Fonction</th><th>Rôle</th><th>Utilisée par</th></tr></thead>
+		<tbody>
+			<tr><td><code>loadConfig()</code></td><td>Lit l’INI, applique les valeurs par défaut, types et bornes ; <code>validateNoSecrets()</code> refuse toute clé dans la config.</td><td>asmira</td></tr>
+			<tr><td><code>createRunId()</code> · <code>validateRunId()</code></td><td>Identifiant UTC du run, qui préfixe tous les fichiers.</td><td>les trois</td></tr>
+			<tr><td><code>atomicWriteJson()</code> · <code>atomicWriteNdjson()</code></td><td>Écriture dans un fichier temporaire, <code>fsync</code>, puis renommage.</td><td>les trois</td></tr>
+			<tr><td><code>readJson()</code></td><td>Lecture tolérante (valeur par défaut si absent) — relit <code>list_ip.json</code> et le checkpoint.</td><td>webTLS</td></tr>
+			<tr><td><code>utcNow()</code> · <code>stableId()</code></td><td>Horodatage ISO UTC ; hash déterministe pour les identifiants d’événements.</td><td>les trois</td></tr>
+		</tbody>
+	</table>
+	</div>
+</section>
+
+<!-- ================= RÉGLAGES ================= -->
+<section>
+	<h2>Où agir</h2>
+	<p class="lede">Les paramètres de <code>/etc/asmira/asmira.conf</code> et la fonction qu’ils pilotent.</p>
+	<div class="table-wrap">
+	<table>
+		<thead><tr><th>Paramètre</th><th>Pilote</th><th>Effet</th></tr></thead>
+		<tbody>
+			<tr><td><code>sources</code> · <code>enable_amass</code></td><td><code>buildCollectors()</code></td><td>Quelles sources tournent ; Amass seulement par son drapeau.</td></tr>
+			<tr><td><code>collector_workers</code></td><td><code>collectFindings()</code></td><td>Paires (source, domaine) simultanées.</td></tr>
+			<tr><td><code>source_timeout</code> · <code>max_pages</code></td><td>collecteurs</td><td>Délai par source ; pages API maximales par domaine.</td></tr>
+			<tr><td><code>shodan_history</code></td><td><code>ShodanDnsCollector</code></td><td>Historique DNS Shodan : plus de pages, plus de crédits. <code>false</code> depuis le 30 sept.</td></tr>
+			<tr><td><code>dns_workers</code> · <code>dns_timeout</code> · <code>wildcard_samples</code></td><td><code>resolveCandidateHosts()</code></td><td>Parallélisme et rigueur de la validation DNS.</td></tr>
+			<tr><td><code>endpoint_workers</code></td><td><code>buildListIps()</code> · <code>tlsAnalyse()</code></td><td>Couples FQDN/IP analysés en parallèle.</td></tr>
+			<tr><td><code>subprocess_budget</code></td><td><code>commandSlot()</code></td><td>Plafond réel de nmap / openssl / netcat simultanés.</td></tr>
+			<tr><td><code>checkpoint_every</code></td><td><code>tlsAnalyse()</code></td><td>Fréquence de sauvegarde pour reprendre un run interrompu.</td></tr>
+			<tr><td><code>max_endpoints</code></td><td><code>buildListIps()</code></td><td>Plafonne le scan (pilotes) ; rend le run <code>partial</code>.</td></tr>
+			<tr><td><code>authorized</code></td><td><code>run()</code></td><td>Sans <code>true</code>, aucun scan actif ne démarre.</td></tr>
+		</tbody>
+	</table>
+	</div>
+
+	<h3>Règles qui traversent le code</h3>
+	<ul class="rules">
+		<li>Une source qui échoue n’arrête jamais la découverte : elle devient un rapport <code>failed</code> ou <code>skipped</code>, et le run devient <code>partial</code>.</li>
+		<li>Un couple FQDN/IP qui échoue n’arrête jamais la cartographie : <code>scan_status = failed</code> et on passe au suivant.</li>
+		<li>Les secrets ne viennent que de l’environnement et sont masqués par <code>redactSecrets()</code> dans tout message d’erreur.</li>
+		<li>Toute écriture est atomique ; seul le checkpoint est relu en cours de run.</li>
+		<li>Présence dans une source ≠ exposition : seul un nom explicite qui résout aujourd’hui atteint le scan actif.</li>
+	</ul>
+</section>
+</div>
+
+</body></html>

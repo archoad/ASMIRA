@@ -13,6 +13,7 @@ from urllib.request import Request, urlopen
 
 BASE_DIR = Path(__file__).resolve().parent
 DATA_STREAMS = ('discovery', 'exposure', 'run')
+LEGACY_EXPOSURE_LATEST = 'asmira-exposure-latest'
 TRANSFORM_UPDATE_FIELDS = (
 	'_meta',
 	'description',
@@ -251,17 +252,6 @@ def configureElasticsearch(client, retentionDays):
 		'asmira-discovery-latest',
 		loadJson('elasticsearch/asmira-discovery-latest-transform.json'),
 	)
-	legacyTransform = client.request(
-		'GET',
-		'_transform/asmira-exposure-latest',
-		allowedStatuses=(404,),
-	)
-	if not (legacyTransform and legacyTransform.get('status') == 404):
-		client.request(
-			'POST',
-			'_transform/asmira-exposure-latest/_stop',
-			allowedStatuses=(409,),
-		)
 	aliasActions = []
 	for aliasName in (
 		'asmira-exposure-current',
@@ -302,6 +292,25 @@ def configureElasticsearch(client, retentionDays):
 			},
 		}])
 	client.request('POST', '_aliases', {'actions': aliasActions})
+	removeLegacyExposureLatest(client)
+
+
+def removeLegacyExposureLatest(client):
+	# Ancien modèle FQDN/IP remplacé par asmira-fqdn-latest. Supprimé après les
+	# alias, pour que leurs actions remove ne visent pas un index déjà effacé.
+	legacyTransform = client.request(
+		'GET',
+		f'_transform/{LEGACY_EXPOSURE_LATEST}',
+		allowedStatuses=(404,),
+	)
+	if not (legacyTransform and legacyTransform.get('status') == 404):
+		client.request(
+			'POST',
+			f'_transform/{LEGACY_EXPOSURE_LATEST}/_stop?wait_for_completion=true',
+			allowedStatuses=(409,),
+		)
+		client.request('DELETE', f'_transform/{LEGACY_EXPOSURE_LATEST}')
+	client.request('DELETE', LEGACY_EXPOSURE_LATEST, allowedStatuses=(404,))
 
 
 def configureKibana(client):

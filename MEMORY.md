@@ -1,6 +1,6 @@
 # Mémoire du projet Asmira
 
-Dernière mise à jour : 2026-08-09
+Dernière mise à jour : 2026-09-30
 
 Ce document conserve uniquement l'état confirmé et les décisions durables du
 projet. Il ne doit contenir aucun secret, identifiant ni inventaire de cible.
@@ -114,7 +114,9 @@ certificat. Un run plafonné par `max_endpoints` ou comportant une source
 incomplète est marqué `partial` : il ajoute ou met à jour les FQDN observés mais
 n’émet aucun tombstone, afin de ne pas créer de disparitions artificielles.
 
-Les versions installées et confirmées d’Elasticsearch et Kibana sont `9.5.0`.
+Les versions installées et confirmées d’Elasticsearch et Kibana sont `9.5.4`
+(constaté le 1er octobre 2026). Les data streams Asmira sont configurés en
+production avec une rétention de 730 jours (`--retention-days 730`).
 Le dashboard provisionné **[archoad] Asmira — Surface d’exposition globale**
 contient deux contrôles épinglés dans cet ordre : **Domaine** sur
 `server.registered_domain`, puis **FQDN** sur `server.domain`. Cet ordre permet
@@ -185,6 +187,12 @@ confirmé fonctionnel le 3 août 2026 avec 100 endpoints.
 - Les bases GeoIP, le GeoJSON local et les plages propres à l’opérateur ne sont
   pas versionnés. Les préfixes facultatifs sont lus depuis
   `ASMIRA_INTERNAL_NETWORKS` dans l’environnement protégé.
+- Les écritures atomiques (`atomicWriteJson`, `atomicWriteNdjson`) appliquent
+  l’umask du processus au lieu du mode 0600 imposé par `mkstemp()` : sous
+  `UMask=0027`, les rapports, exports et états sont créés en 0640. Sur `srv`,
+  le compte de maintenance `codex` lit `/var/lib/asmira` par ACL (accès et
+  défaut), `.config` restant fermé ; le répertoire n’est pas ouvert aux autres
+  comptes.
 - Les secrets sont lus uniquement depuis l'environnement et ne sont conservés
   ni dans le code, ni dans les arguments, ni dans les journaux, ni dans la
   documentation.
@@ -203,6 +211,20 @@ confirmé fonctionnel le 3 août 2026 avec 100 endpoints.
 - Les dépendances TLS Python validées en production sont
   `cryptography==46.0.7` et `pyOpenSSL==26.0.0`. Conserver leurs contraintes
   compatibles lors des futures mises à jour.
+- Shodan DNS (`/dns/domain`) consomme un crédit de requête par page ; le plan
+  `dev` en fournit 100 par mois. Le collecteur interroge `/api-info` avant la
+  collecte, répartit les crédits restants entre les domaines, réutilise ceux
+  laissés par les domaines terminés, et marque la source en échec (run
+  `partial`) lorsque le budget est épuisé, en conservant les pages obtenues.
+  `shodan_history` vaut `false` par défaut pour limiter le nombre de pages.
+- Cert Spotter est utilisé sans clé (quota non authentifié d’une dizaine de
+  requêtes, porté par l’IP de `srv`). Le collecteur est incrémental : il
+  conserve par domaine le curseur `after` et les noms déjà vus dans
+  `[storage] state_dir/certspotter.json` (défaut `/var/lib/asmira/state`),
+  sauvegarde sa progression après chaque page, sérialise ses requêtes, gère
+  lui-même les 429 (attente de `Retry-After` dans un budget cumulé de 30 min
+  par run) et conserve les noms connus lorsqu’il s’arrête. Supprimer ce
+  fichier force un rechargement complet de l’historique.
 - La classification PQC des certificats repose sur les OID X.509 et doit rester
   disponible même si `cryptography` ne sait pas construire l’objet de clé
   publique correspondant. Un OID non reconnu est `unknown`, jamais supposé
@@ -229,9 +251,6 @@ python3 -m pytest -q
   reconnaissance et l'analyse.
 - Les valeurs finales de `endpoint_workers` et `subprocess_budget` doivent être
   déterminées par les pilotes de 100 puis 500 endpoints.
-- La durée de rétention Elasticsearch doit être choisie après mesure de la
-  taille des documents et de la pression disque ; `elastic/setup.py` exige donc
-  une valeur explicite.
 - La policy Fleet Asmira et la lecture effective des exports sont confirmées ;
   l’utilisateur effectif de l’Elastic Agent et le détail de ses droits restent
   à documenter sur `srv`.
@@ -310,3 +329,28 @@ python3 -m pytest -q
   `present=false`. Les empreintes de certificat et statuts PQC sont comparés au
   dernier état, avec conservation des valeurs précédentes et visualisation des
   transitions dans Kibana.
+- **2026-09-30 :** diagnostic de l’échec de Shodan DNS sur `srv` : les 401
+  provenaient de l’épuisement des 100 crédits de requête mensuels du plan
+  `dev`, et non d’une clé invalide. Le timer se déclenchait tous les deux à
+  trois jours et chaque run consommait environ 30 crédits avec
+  `history=true`, épuisant le quota vers le 8 du mois. Le timer a été remis au
+  rythme hebdomadaire, le collecteur gère désormais un budget de crédits et
+  journalise le message d’erreur renvoyé par Shodan, et `shodan_history` passe
+  à `false`.
+- **2026-09-30 :** Cert Spotter échouait en 429 sur 4 à 6 domaines sur 12 à
+  chaque run : chaque run retéléchargeait tout l’historique, jusqu’à quatre
+  domaines en parallèle, et un 429 en cours de pagination perdait toutes les
+  pages obtenues. Aucune alternative gratuite et fiable n’a été retenue
+  (crt.sh est déjà interrogé via Subfinder et renvoyait des 502). Le
+  collecteur est devenu incrémental avec état persistant et a été déployé sur
+  `srv` ; les premiers runs complètent l’historique des gros domaines et
+  peuvent rester `partial`.
+- **2026-10-01 :** comparaison de la production Kibana/Elasticsearch `9.5.4`
+  avec le dépôt. Dashboard, data views, component template, index templates,
+  transforms et alias sont identiques, hors valeurs par défaut ajoutées par
+  Kibana. La description du dashboard, vidée en production, est vidée dans le
+  dépôt. La rétention des data streams est de 730 jours. Le transform
+  historique `asmira-exposure-latest` (ancien modèle FQDN/IP) tournait encore,
+  le setup Elasticsearch n’ayant pas été rejoué depuis le 9 août : il a été
+  arrêté puis supprimé avec son index, sans référence restante. `setup.py`
+  supprime désormais ce transform et cet index au lieu de seulement l’arrêter.

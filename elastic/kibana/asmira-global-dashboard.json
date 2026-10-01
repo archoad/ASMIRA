@@ -1,6 +1,6 @@
 {
   "title": "[archoad] Asmira — Surface d’exposition globale",
-  "description": "Base courante unique par FQDN, changements de certificats et de conformité PQC, santé du dernier run, historique et découverte DNS Asmira. Les observations par IP sont agrégées dans leur FQDN.",
+  "description": "",
   "time_range": {
     "from": "now-90d",
     "to": "now"

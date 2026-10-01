@@ -11,9 +11,11 @@ import fqdnCollect
 
 
 class FakeResponse:
-	def __init__(self, payload, error=None):
+	def __init__(self, payload, error=None, statusCode=200, headers=None):
 		self.payload = payload
 		self.error = error
+		self.status_code = statusCode
+		self.headers = {} if headers is None else headers
 
 	def raise_for_status(self):
 		if self.error:
@@ -330,6 +332,102 @@ def testShodanDnsWithoutCredentialIsSkipped():
 	assert 'SHODAN_API_KEY' in report['error']
 
 
+def shodanApiInfo(credits, limit=100):
+	return FakeResponse({
+		'plan': 'dev',
+		'query_credits': credits,
+		'usage_limits': {'query_credits': limit},
+	})
+
+
+def testShodanDnsIsSkippedWhenQueryCreditsAreExhausted():
+	session = QueueSession([shodanApiInfo(0)])
+	collector = fqdnCollect.ShodanDnsCollector(apiKey='test-key', session=session)
+	collector.prepare(['example.com'])
+
+	findings, report = fqdnCollect.runCollector(collector, 'example.com')
+
+	assert findings == []
+	assert report['status'] == 'skipped'
+	assert 'épuisés (0/100)' in report['error']
+	assert [call[0] for call in session.calls] == [fqdnCollect.SHODAN_API_INFO_URL]
+
+
+def testShodanDnsSplitsQueryCreditsAcrossDomains():
+	session = QueueSession([shodanApiInfo(3)])
+	collector = fqdnCollect.ShodanDnsCollector(apiKey='test-key', session=session)
+	collector.prepare(['example.net', 'example.com'])
+
+	assert collector.quotas == {'example.com': 2, 'example.net': 1}
+
+
+def testShodanDnsKeepsPagesCollectedBeforeBudgetExhaustion():
+	session = QueueSession([
+		shodanApiInfo(2),
+		FakeResponse({'data': [], 'subdomains': ['api'], 'more': True}),
+		FakeResponse({'data': [], 'subdomains': ['shop'], 'more': True}),
+	])
+	collector = fqdnCollect.ShodanDnsCollector(apiKey='test-key', session=session)
+	collector.prepare(['example.com'])
+
+	findings, report = fqdnCollect.runCollector(collector, 'example.com')
+
+	assert {item.name for item in findings} == {'api.example.com', 'shop.example.com'}
+	assert report['status'] == 'failed'
+	assert report['count'] == 2
+	assert 'budget de crédits Shodan épuisé après 2 page(s)' in report['error']
+	assert len(session.calls) == 3
+
+
+def testShodanDnsReusesCreditsLeftByFinishedDomains():
+	session = QueueSession([
+		shodanApiInfo(4),
+		FakeResponse({'data': [], 'subdomains': ['api'], 'more': False}),
+		FakeResponse({'data': [], 'subdomains': ['a'], 'more': True}),
+		FakeResponse({'data': [], 'subdomains': ['b'], 'more': True}),
+		FakeResponse({'data': [], 'subdomains': ['c'], 'more': False}),
+	])
+	collector = fqdnCollect.ShodanDnsCollector(apiKey='test-key', session=session)
+	collector.prepare(['example.com', 'example.net'])
+
+	collector.collect('example.com')
+	findings = collector.collect('example.net')
+
+	assert {item.name for item in findings} == {'a.example.net', 'b.example.net', 'c.example.net'}
+
+
+def testShodanDnsReportsShodanErrorMessage():
+	error = requests.HTTPError('401 Client Error: Unauthorized')
+	session = QueueSession([
+		FakeResponse(
+			{'error': 'Insufficient query credits, please upgrade your API plan'},
+			error=error,
+			statusCode=401,
+		),
+	])
+	collector = fqdnCollect.ShodanDnsCollector(apiKey='test-key', session=session)
+
+	findings, report = fqdnCollect.runCollector(collector, 'example.com')
+
+	assert findings == []
+	assert report['status'] == 'failed'
+	assert 'HTTP 401: Insufficient query credits' in report['error']
+
+
+def testShodanDnsCollectsWithoutBudgetWhenApiInfoFails():
+	session = QueueSession([
+		FakeResponse({'error': 'boom'}, error=requests.HTTPError('500'), statusCode=500),
+		FakeResponse({'data': [], 'subdomains': ['api'], 'more': False}),
+	])
+	collector = fqdnCollect.ShodanDnsCollector(apiKey='test-key', session=session)
+	collector.prepare(['example.com'])
+
+	findings, report = fqdnCollect.runCollector(collector, 'example.com')
+
+	assert report['status'] == 'success'
+	assert {item.name for item in findings} == {'api.example.com'}
+
+
 def testCollectorReportNeverStoresApiKey(monkeypatch):
 	secret = 'secret-value-that-must-not-leak'
 	monkeypatch.setenv('SHODAN_API_KEY', secret)
@@ -382,6 +480,148 @@ def testCertSpotterRejectsBrokenPagination():
 	assert findings == []
 	assert report['status'] == 'failed'
 	assert 'Pagination' in report['error']
+
+
+def certIssuance(issuanceId, *names):
+	return {
+		'id': issuanceId,
+		'dns_names': list(names),
+		'not_before': '2026-01-01T00:00:00Z',
+		'not_after': '2027-01-01T00:00:00Z',
+		'cert_sha256': f'sha-{issuanceId}',
+	}
+
+
+def rateLimited(retryAfter):
+	return FakeResponse(
+		None,
+		error=requests.HTTPError('429 Client Error'),
+		statusCode=429,
+		headers={'Retry-After': str(retryAfter)},
+	)
+
+
+def testCertSpotterResumesFromPersistedCursor(tmp_path):
+	stateFile = tmp_path / 'state' / 'certspotter.json'
+	stateFile.parent.mkdir()
+	stateFile.write_text(json.dumps({
+		'version': 1,
+		'domains': {
+			'example.com': {
+				'after': '41',
+				'complete': True,
+				'names': {'old.example.com': {'issuance_id': '41'}},
+			},
+		},
+	}))
+	session = QueueSession([
+		FakeResponse([certIssuance('42', 'new.example.com')]),
+		FakeResponse([]),
+	])
+	collector = fqdnCollect.CertSpotterCollector(session=session, stateFile=stateFile)
+
+	findings = collector.collect('example.com')
+
+	assert {item.name for item in findings} == {'old.example.com', 'new.example.com'}
+	assert ('after', '41') in session.calls[0][1]['params']
+	assert ('after', '42') in session.calls[1][1]['params']
+	saved = json.loads(stateFile.read_text())['domains']['example.com']
+	assert saved['after'] == '42'
+	assert saved['complete'] is True
+	assert set(saved['names']) == {'old.example.com', 'new.example.com'}
+
+
+def testCertSpotterKeepsProgressWhenRateLimited(tmp_path):
+	stateFile = tmp_path / 'certspotter.json'
+	session = QueueSession([
+		FakeResponse([certIssuance('10', 'api.example.com')]),
+		rateLimited(3600),
+	])
+	sleeps = []
+	collector = fqdnCollect.CertSpotterCollector(
+		session=session,
+		stateFile=stateFile,
+		maxWait=600,
+		sleep=sleeps.append,
+	)
+
+	findings, report = fqdnCollect.runCollector(collector, 'example.com')
+
+	assert {item.name for item in findings} == {'api.example.com'}
+	assert report['status'] == 'failed'
+	assert 'quota Cert Spotter atteint' in report['error']
+	assert sleeps == []
+	saved = json.loads(stateFile.read_text())['domains']['example.com']
+	assert saved['after'] == '10'
+	assert saved['complete'] is False
+
+
+def testCertSpotterWaitsForShortRetryAfter(tmp_path):
+	session = QueueSession([
+		rateLimited(30),
+		FakeResponse([]),
+	])
+	sleeps = []
+	collector = fqdnCollect.CertSpotterCollector(
+		session=session,
+		stateFile=tmp_path / 'certspotter.json',
+		sleep=sleeps.append,
+	)
+
+	findings, report = fqdnCollect.runCollector(collector, 'example.com')
+
+	assert report['status'] == 'success'
+	assert sleeps == [30]
+	assert len(session.calls) == 2
+
+
+def testCertSpotterWaitBudgetIsSharedAcrossDomains(tmp_path):
+	session = QueueSession([
+		rateLimited(400),
+		FakeResponse([]),
+		rateLimited(400),
+	])
+	sleeps = []
+	collector = fqdnCollect.CertSpotterCollector(
+		session=session,
+		stateFile=tmp_path / 'certspotter.json',
+		maxWait=600,
+		sleep=sleeps.append,
+	)
+
+	unused, first = fqdnCollect.runCollector(collector, 'example.com')
+	unused, second = fqdnCollect.runCollector(collector, 'example.net')
+
+	assert first['status'] == 'success'
+	assert second['status'] == 'failed'
+	assert sleeps == [400]
+
+
+def testCertSpotterDoesNotStoreOutOfScopeNames(tmp_path):
+	stateFile = tmp_path / 'certspotter.json'
+	session = QueueSession([
+		FakeResponse([certIssuance('7', 'api.example.com', 'other.example.org')]),
+		FakeResponse([]),
+	])
+	collector = fqdnCollect.CertSpotterCollector(session=session, stateFile=stateFile)
+
+	collector.collect('example.com')
+
+	saved = json.loads(stateFile.read_text())['domains']['example.com']
+	assert set(saved['names']) == {'api.example.com'}
+
+
+def testCertSpotterRestartsFromScratchOnCorruptState(tmp_path):
+	stateFile = tmp_path / 'certspotter.json'
+	stateFile.write_text('{pas du json')
+	session = QueueSession([FakeResponse([])])
+	collector = fqdnCollect.CertSpotterCollector(session=session, stateFile=stateFile)
+
+	findings = collector.collect('example.com')
+
+	assert findings == []
+	assert not any(key == 'after' for key, unused in session.calls[0][1]['params'])
+	assert json.loads(stateFile.read_text())['domains']['example.com']['complete'] is True
 
 
 def testAmassCollectorUsesExplicitActiveMode(tmp_path, monkeypatch):

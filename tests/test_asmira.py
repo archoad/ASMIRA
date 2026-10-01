@@ -509,11 +509,13 @@ xlsx = false
 runs_dir = {tmp_path / "runs"}
 export_dir = {tmp_path / "export"}
 pictures_dir = {tmp_path / "pictures"}
+state_dir = {tmp_path / "state"}
 retention_days = 14
 ''')
 	config = asmiraCommon.loadConfig(configFile)
 
 	def fakeDiscovery(hosts, **kwargs):
+		assert kwargs['stateDir'] == tmp_path / 'state'
 		runDir = Path(kwargs['dataDir'])
 		hostsFile = runDir / 'hosts.json'
 		asmiraCommon.atomicWriteJson(hostsFile, [{'host': 'www.example.com'}])
@@ -582,3 +584,16 @@ retention_days = 14
 	assert runEvent['asmira']['run']['status'] == 'success'
 	assert runEvent['asmira']['run']['counts']['endpoints'] == 1
 	assert runEvent['asmira']['run']['counts']['fqdns'] == 1
+
+
+@pytest.mark.parametrize('writer, payload', [
+	(asmiraCommon.atomicWriteJson, {'a': 1}),
+	(asmiraCommon.atomicWriteNdjson, [{'a': 1}]),
+])
+def testAtomicWritesHonourProcessUmask(tmp_path, monkeypatch, writer, payload):
+	monkeypatch.setattr(asmiraCommon, 'PROCESS_UMASK', 0o027)
+	output = tmp_path / 'out.json'
+
+	writer(output, payload)
+
+	assert output.stat().st_mode & 0o777 == 0o640

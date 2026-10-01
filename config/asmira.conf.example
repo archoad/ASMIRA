@@ -15,7 +15,7 @@ source_timeout = 600
 dns_timeout = 4
 wildcard_samples = 2
 max_pages = 1000
-shodan_history = true
+shodan_history = false
 
 [active_scan]
 enabled = true
@@ -35,6 +35,8 @@ xlsx = false
 runs_dir = /var/lib/asmira/runs
 export_dir = /var/lib/asmira/export
 pictures_dir = /var/lib/asmira/pictures
+# État persistant des collecteurs incrémentaux (curseur Cert Spotter).
+state_dir = /var/lib/asmira/state
 # Rétention locale des exports déjà destinés à Elastic Agent.
 retention_days = 14
 

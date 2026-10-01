@@ -27,7 +27,8 @@ install -d -o asmira -g asmira -m 0750 \
 	"$STATE_DIR" \
 	"$STATE_DIR/runs" \
 	"$STATE_DIR/export" \
-	"$STATE_DIR/pictures"
+	"$STATE_DIR/pictures" \
+	"$STATE_DIR/state"
 
 for sourceFile in asmira.py asmiraCommon.py fqdnCollect.py webTLS.py requirements.txt; do
 	install -o root -g root -m 0644 "$SOURCE_DIR/$sourceFile" "$INSTALL_DIR/$sourceFile"

@@ -651,6 +651,7 @@ def run(config, runId=None, maxEndpoints=None, discoveryOnly=False):
 	runDir.mkdir(parents=True, exist_ok=True)
 	config.exportDir.mkdir(parents=True, exist_ok=True)
 	config.picturesDir.mkdir(parents=True, exist_ok=True)
+	config.stateDir.mkdir(parents=True, exist_ok=True)
 	discoveryResult = None
 	exposureResult = None
 	status = 'failed'
@@ -668,6 +669,7 @@ def run(config, runId=None, maxEndpoints=None, discoveryOnly=False):
 			list(config.domains),
 			dataDir=runDir,
 			txtdnsDir=runDir / 'txtdns',
+			stateDir=config.stateDir,
 			sourceNames=sourceNames,
 			sourceTimeout=config.sourceTimeout,
 			maxPages=config.maxPages,

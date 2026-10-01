@@ -11,6 +11,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -26,12 +27,13 @@ import tldextract
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
-from asmiraCommon import atomicWriteJson, createRunId, utcNow, validateRunId
+from asmiraCommon import atomicWriteJson, createRunId, readJson, utcNow, validateRunId
 
 
 BASE_DIR = Path(__file__).resolve().parent
 DATA_DIR = BASE_DIR / 'data'
 TXTDNS_DIR = DATA_DIR / 'txtdns'
+STATE_DIR = DATA_DIR / 'state'
 DEFAULT_HOSTS = ('example.com',)
 DEFAULT_SOURCES = ('shodan-ctl', 'subfinder', 'shodan-dns', 'certspotter')
 AVAILABLE_SOURCES = DEFAULT_SOURCES + ('amass',)
@@ -41,17 +43,26 @@ DEFAULT_COLLECTOR_WORKERS = 4
 DEFAULT_DNS_WORKERS = 20
 DEFAULT_WILDCARD_SAMPLES = 2
 DEFAULT_MAX_PAGES = 1000
+DEFAULT_CERTSPOTTER_MAX_WAIT = 1800
+CERTSPOTTER_STATE_FILE = 'certspotter.json'
 DEFAULT_SUBFINDER_PATH = shutil.which('subfinder')
 DEFAULT_AMASS_PATH = shutil.which('amass')
 HOST_LABEL_PATTERN = re.compile(r'^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$')
 DOMAIN_EXTRACTOR = tldextract.TLDExtract(suffix_list_urls=(), cache_dir=None)
 SHODAN_CTL_URL = 'https://ctl.shodan.io/api/v1/domain/{domain}/hostnames'
 SHODAN_DNS_URL = 'https://api.shodan.io/dns/domain/{domain}'
+SHODAN_API_INFO_URL = 'https://api.shodan.io/api-info'
 CERTSPOTTER_URL = 'https://api.certspotter.com/v1/issuances'
 SECRET_ENV_NAMES = ('SHODAN_API_KEY', 'CERTSPOTTER_API_KEY')
 
 debug = False
 now = datetime.now().date().strftime('%Y%m%d')
+
+
+class IncompleteCollectionError(RuntimeError):
+	def __init__(self, message, findings):
+		super().__init__(message)
+		self.findings = findings
 
 
 @dataclass
@@ -65,6 +76,9 @@ class Finding:
 
 class Collector:
 	name = 'collector'
+
+	def prepare(self, domains):
+		pass
 
 	def availability(self):
 		return(True, None)
@@ -196,7 +210,7 @@ def createFinding(name, domain, source, evidence=None):
 	))
 
 
-def createHttpSession():
+def createHttpSession(retryStatuses=(429, 500, 502, 503, 504)):
 	debugDisplay()
 	retry = Retry(
 		total=3,
@@ -204,7 +218,7 @@ def createHttpSession():
 		read=3,
 		status=3,
 		backoff_factor=1,
-		status_forcelist=(429, 500, 502, 503, 504),
+		status_forcelist=retryStatuses,
 		allowed_methods=frozenset({'GET'}),
 		respect_retry_after_header=True,
 	)
@@ -324,6 +338,18 @@ class SubfinderCollector(Collector):
 			outputFile.unlink(missing_ok=True)
 
 
+def shodanErrorMessage(response):
+	try:
+		payload = response.json()
+	except ValueError:
+		payload = None
+	message = payload.get('error') if isinstance(payload, dict) else None
+	statusCode = getattr(response, 'status_code', None)
+	if not message:
+		message = getattr(response, 'reason', None) or 'réponse sans détail'
+	return(f'HTTP {statusCode}: {message}' if statusCode else message)
+
+
 class ShodanDnsCollector(Collector):
 	name = 'shodan-dns'
 
@@ -332,7 +358,7 @@ class ShodanDnsCollector(Collector):
 		apiKey=None,
 		session=None,
 		timeout=DEFAULT_SOURCE_TIMEOUT,
-		history=True,
+		history=False,
 		maxPages=DEFAULT_MAX_PAGES,
 	):
 		self.apiKey = apiKey
@@ -340,11 +366,85 @@ class ShodanDnsCollector(Collector):
 		self.timeout = min(timeout, 60)
 		self.history = history
 		self.maxPages = maxPages
+		self.lock = threading.Lock()
+		self.credits = None
+		self.creditLimit = None
+		self.quotas = None
+		self.surplus = 0
+
+	def prepare(self, domains):
+		# Chaque page de /dns/domain consomme un crédit de requête mensuel :
+		# les crédits restants sont répartis équitablement entre les domaines.
+		if not self.apiKey or not domains:
+			return
+		try:
+			response = self.session.get(
+				SHODAN_API_INFO_URL,
+				params={'key': self.apiKey},
+				timeout=(5, self.timeout),
+			)
+			try:
+				response.raise_for_status()
+			except requests.HTTPError as error:
+				raise RuntimeError(shodanErrorMessage(response)) from error
+			payload = response.json()
+			credits = payload.get('query_credits') if isinstance(payload, dict) else None
+			if not isinstance(credits, int) or isinstance(credits, bool) or credits < 0:
+				raise ValueError('Réponse Shodan api-info invalide')
+		except Exception as error:
+			print(
+				f'[avertissement] shodan-dns: crédits de requête inconnus, collecte sans budget '
+				f'({redactSecrets(error)})',
+				file=sys.stderr,
+			)
+			return
+
+		usageLimits = payload.get('usage_limits')
+		if isinstance(usageLimits, dict):
+			self.creditLimit = usageLimits.get('query_credits')
+		self.credits = credits
+		orderedDomains = sorted(set(domains))
+		share, remainder = divmod(credits, len(orderedDomains))
+		self.quotas = {
+			domain: share + (1 if index < remainder else 0)
+			for index, domain in enumerate(orderedDomains)
+		}
+		self.surplus = 0
+		print(
+			f'[info] shodan-dns: {credits} crédit(s) de requête disponible(s) pour '
+			f'{len(orderedDomains)} domaine(s)',
+			file=sys.stderr,
+		)
 
 	def availability(self):
 		if not self.apiKey:
 			return(False, 'variable SHODAN_API_KEY absente')
+		if self.credits == 0:
+			limit = f'/{self.creditLimit}' if self.creditLimit is not None else ''
+			return(
+				False,
+				f'crédits de requête Shodan épuisés (0{limit}), rechargement mensuel attendu',
+			)
 		return(True, None)
+
+	def reserveCredit(self, domain):
+		if self.quotas is None:
+			return(True)
+		with self.lock:
+			if self.quotas.get(domain, 0) > 0:
+				self.quotas[domain] -= 1
+				return(True)
+			if self.surplus > 0:
+				self.surplus -= 1
+				return(True)
+			return(False)
+
+	def releaseCredits(self, domain):
+		if self.quotas is None:
+			return
+		with self.lock:
+			self.surplus += self.quotas.get(domain, 0)
+			self.quotas[domain] = 0
 
 	def expandSubdomain(self, subdomain, domain):
 		if not isinstance(subdomain, str):
@@ -358,9 +458,20 @@ class ShodanDnsCollector(Collector):
 		return(f'{subdomain}.{domain}')
 
 	def collect(self, domain):
+		try:
+			return(self.collectPages(domain))
+		finally:
+			self.releaseCredits(domain)
+
+	def collectPages(self, domain):
 		findings = []
 		url = SHODAN_DNS_URL.format(domain=quote(domain, safe=''))
 		for page in range(1, self.maxPages + 1):
+			if not self.reserveCredit(domain):
+				raise IncompleteCollectionError(
+					f'budget de crédits Shodan épuisé après {page - 1} page(s)',
+					findings,
+				)
 			response = self.session.get(
 				url,
 				params={
@@ -370,7 +481,13 @@ class ShodanDnsCollector(Collector):
 				},
 				timeout=(5, self.timeout),
 			)
-			response.raise_for_status()
+			try:
+				response.raise_for_status()
+			except requests.HTTPError as error:
+				message = f'page {page} refusée par Shodan ({shodanErrorMessage(response)})'
+				if findings:
+					raise IncompleteCollectionError(message, findings) from error
+				raise RuntimeError(message) from error
 			payload = response.json()
 			if not isinstance(payload, dict):
 				raise ValueError('Réponse Shodan DNS invalide')
@@ -401,6 +518,14 @@ class ShodanDnsCollector(Collector):
 		return(findings)
 
 
+def parseRetryAfter(response, default=60):
+	value = getattr(response, 'headers', {}).get('Retry-After')
+	try:
+		return(max(0, int(value)))
+	except (TypeError, ValueError):
+		return(default)
+
+
 class CertSpotterCollector(Collector):
 	name = 'certspotter'
 
@@ -410,36 +535,120 @@ class CertSpotterCollector(Collector):
 		session=None,
 		timeout=DEFAULT_SOURCE_TIMEOUT,
 		maxPages=DEFAULT_MAX_PAGES,
+		stateFile=None,
+		maxWait=DEFAULT_CERTSPOTTER_MAX_WAIT,
+		sleep=time.sleep,
 	):
 		self.apiKey = apiKey
-		self.session = createHttpSession() if session is None else session
+		# Les 429 sont gérés par le collecteur : les retries urllib3 ne font qu'attendre
+		# Retry-After avant d'échouer en perdant les pages déjà obtenues.
+		self.session = createHttpSession(retryStatuses=(500, 502, 503, 504)) if session is None else session
 		self.timeout = min(timeout, 60)
 		self.maxPages = maxPages
+		self.stateFile = Path(stateFile) if stateFile else None
+		self.maxWait = maxWait
+		self.sleep = sleep
+		self.requestLock = threading.Lock()
+		self.stateLock = threading.Lock()
+		self.state = None
+		self.waited = 0
+
+	def loadState(self):
+		with self.stateLock:
+			if self.state is not None:
+				return
+			state = {}
+			if self.stateFile is not None:
+				try:
+					state = readJson(self.stateFile, default={})
+				except (OSError, ValueError) as error:
+					print(
+						f'[avertissement] certspotter: état illisible, reprise complète ({error})',
+						file=sys.stderr,
+					)
+					state = {}
+			if not isinstance(state, dict) or not isinstance(state.get('domains'), dict):
+				state = {'version': 1, 'domains': {}}
+			self.state = state
+
+	def domainState(self, domain):
+		with self.stateLock:
+			entry = self.state['domains'].setdefault(domain, {})
+			if not isinstance(entry.get('names'), dict):
+				entry['names'] = {}
+			entry.setdefault('after', None)
+			entry.setdefault('complete', False)
+			return(entry)
+
+	def saveState(self):
+		if self.stateFile is None:
+			return
+		with self.stateLock:
+			self.stateFile.parent.mkdir(parents=True, exist_ok=True)
+			atomicWriteJson(self.stateFile, self.state)
+
+	def request(self, domain, params, headers):
+		# Une seule requête à la fois : le quota non authentifié est porté par l’IP.
+		# maxWait borne l’attente cumulée de tout le run, tous domaines confondus.
+		with self.requestLock:
+			while True:
+				response = self.session.get(
+					CERTSPOTTER_URL,
+					params=params,
+					headers=headers,
+					timeout=(5, self.timeout),
+				)
+				if getattr(response, 'status_code', None) != 429:
+					return(response)
+				delay = parseRetryAfter(response)
+				if self.waited + delay > self.maxWait:
+					return(response)
+				print(
+					f'[info] certspotter ({domain}): quota atteint, nouvelle tentative dans {delay} s',
+					file=sys.stderr,
+				)
+				self.sleep(delay)
+				self.waited += delay
+
+	def findings(self, domain, entry):
+		findings = []
+		for name, evidence in sorted(entry['names'].items()):
+			appendFinding(findings, name, domain, self.name, evidence=dict(evidence))
+		return(findings)
 
 	def collect(self, domain):
-		findings = []
-		after = None
+		self.loadState()
+		entry = self.domainState(domain)
 		headers = {'Authorization': f'Bearer {self.apiKey}'} if self.apiKey else {}
+		pages = 0
+		newNames = 0
 		for page in range(1, self.maxPages + 1):
 			params = [
 				('domain', domain),
 				('include_subdomains', 'true'),
 				('expand', 'dns_names'),
 			]
-			if after is not None:
-				params.append(('after', after))
-			response = self.session.get(
-				CERTSPOTTER_URL,
-				params=params,
-				headers=headers,
-				timeout=(5, self.timeout),
-			)
+			if entry['after'] is not None:
+				params.append(('after', entry['after']))
+			response = self.request(domain, params, headers)
+			if getattr(response, 'status_code', None) == 429:
+				raise IncompleteCollectionError(
+					f'quota Cert Spotter atteint (Retry-After {parseRetryAfter(response)} s) '
+					f'après {pages} page(s) ; reprise au prochain run',
+					self.findings(domain, entry),
+				)
 			response.raise_for_status()
 			payload = response.json()
 			if not isinstance(payload, list):
 				raise ValueError('Réponse Cert Spotter invalide')
+			pages += 1
 			if not payload:
+				entry['complete'] = True
 				break
+
+			nextAfter = payload[-1].get('id') if isinstance(payload[-1], dict) else None
+			if not nextAfter or nextAfter == entry['after']:
+				raise ValueError('Pagination Cert Spotter invalide : identifiant after absent ou répété')
 
 			for issuance in payload:
 				if not isinstance(issuance, dict):
@@ -451,18 +660,32 @@ class CertSpotterCollector(Collector):
 					'cert_sha256': issuance.get('cert_sha256'),
 				}
 				for name in issuance.get('dns_names') or []:
-					appendFinding(findings, name, domain, self.name, evidence=evidence)
+					try:
+						finding = createFinding(name, domain, self.name)
+					except (TypeError, ValueError) as error:
+						# Signalé une seule fois : le curseur ne repassera plus sur ce certificat.
+						print(f'[avertissement] {self.name}: résultat ignoré ({error})', file=sys.stderr)
+						continue
+					if finding.name not in entry['names']:
+						newNames += 1
+					entry['names'][finding.name] = evidence
 
-			nextAfter = payload[-1].get('id') if isinstance(payload[-1], dict) else None
-			if not nextAfter or nextAfter == after:
-				raise ValueError('Pagination Cert Spotter invalide : identifiant after absent ou répété')
-			after = nextAfter
+			entry['after'] = nextAfter
+			entry['updated_at'] = utcNow()
+			self.saveState()
 		else:
 			print(
 				f'[avertissement] certspotter: limite de {self.maxPages} pages atteinte pour {domain}',
 				file=sys.stderr,
 			)
-		return(findings)
+		entry['updated_at'] = utcNow()
+		self.saveState()
+		print(
+			f'[info] certspotter ({domain}): {pages} requête(s), {newNames} nouveau(x) nom(s), '
+			f'{len(entry["names"])} connu(s)',
+			file=sys.stderr,
+		)
+		return(self.findings(domain, entry))
 
 
 class AmassCollector(Collector):
@@ -563,6 +786,17 @@ def runCollector(collector, domain):
 		})
 	try:
 		findings = collector.collect(domain)
+	except IncompleteCollectionError as error:
+		# Les résultats déjà obtenus sont conservés, mais la source reste en échec
+		# afin que le run soit marqué partiel.
+		return(error.findings, {
+			'source': collector.name,
+			'domain': domain,
+			'status': 'failed',
+			'count': len(error.findings),
+			'error': redactSecrets(error),
+			'duration_seconds': round(time.monotonic() - started, 3),
+		})
 	except Exception as error:
 		return([], {
 			'source': collector.name,
@@ -586,6 +820,8 @@ def collectFindings(domains, collectors, workers=DEFAULT_COLLECTOR_WORKERS):
 	debugDisplay()
 	findings = [createFinding(domain, domain, 'seed') for domain in domains]
 	reports = []
+	for collector in collectors:
+		collector.prepare(domains)
 	tasks = [(collector, domain) for domain in domains for collector in collectors]
 	if not tasks:
 		return(findings, reports)
@@ -875,8 +1111,9 @@ def buildCollectors(
 	maxPages=DEFAULT_MAX_PAGES,
 	subfinderPath=DEFAULT_SUBFINDER_PATH,
 	amassPath=DEFAULT_AMASS_PATH,
-	shodanHistory=True,
+	shodanHistory=False,
 	workDir=TXTDNS_DIR,
+	stateDir=STATE_DIR,
 ):
 	debugDisplay()
 	collectors = []
@@ -901,6 +1138,7 @@ def buildCollectors(
 				apiKey=os.environ.get('CERTSPOTTER_API_KEY'),
 				timeout=sourceTimeout,
 				maxPages=maxPages,
+				stateFile=Path(stateDir) / CERTSPOTTER_STATE_FILE,
 			))
 		elif sourceName == 'amass':
 			collectors.append(AmassCollector(
@@ -934,12 +1172,13 @@ def hostCartography(
 	dnsValidator=None,
 	dataDir=DATA_DIR,
 	txtdnsDir=TXTDNS_DIR,
+	stateDir=STATE_DIR,
 	sourceNames=DEFAULT_SOURCES,
 	sourceTimeout=DEFAULT_SOURCE_TIMEOUT,
 	maxPages=DEFAULT_MAX_PAGES,
 	subfinderPath=DEFAULT_SUBFINDER_PATH,
 	amassPath=DEFAULT_AMASS_PATH,
-	shodanHistory=True,
+	shodanHistory=False,
 	collectorWorkers=DEFAULT_COLLECTOR_WORKERS,
 	dnsWorkers=DEFAULT_DNS_WORKERS,
 	dnsTimeout=DEFAULT_DNS_TIMEOUT,
@@ -974,6 +1213,7 @@ def hostCartography(
 			amassPath=amassPath,
 			shodanHistory=shodanHistory,
 			workDir=txtdnsDir,
+			stateDir=stateDir,
 		)
 
 	findings, sourceReports = collectFindings(domains, collectors, workers=collectorWorkers)
@@ -1112,12 +1352,18 @@ def parseArgs(arguments=None):
 	parser.add_argument(
 		'--shodan-history',
 		action=argparse.BooleanOptionalAction,
-		default=True,
-		help='Inclut l’historique DNS Shodan',
+		default=False,
+		help='Inclut l’historique DNS Shodan (plus de pages, donc plus de crédits de requête)',
 	)
 	parser.add_argument(
 		'--run-id',
 		help='Identifiant UTC de l’exécution (généré automatiquement par défaut)',
+	)
+	parser.add_argument(
+		'--state-dir',
+		type=Path,
+		default=STATE_DIR,
+		help=f'Répertoire de l’état persistant des collecteurs incrémentaux (défaut : {STATE_DIR})',
 	)
 	parser.add_argument(
 		'--output-dir',
@@ -1163,6 +1409,7 @@ def main(arguments=None):
 			args.hosts,
 			dataDir=args.output_dir,
 			txtdnsDir=args.output_dir / 'txtdns',
+			stateDir=args.state_dir,
 			sourceNames=sourceNames,
 			sourceTimeout=args.source_timeout,
 			maxPages=args.max_pages,
