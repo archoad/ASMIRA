@@ -411,3 +411,12 @@ Points techniques retenus :
   publié sur <https://www.archoad.io/asmira/>. `site/` et le résultat généré
   `web/` (ancien `docs/`) restent locaux et exclus de Git ; les guides n’offrent
   donc pas de lien vers leur source Markdown.
+- **2026-10-01 — Approche hybride post-quantique (ANSSI), note v2.** La sonde
+  établit désormais la liste exacte des groupes ML-KEM acceptés
+  (`pqc_kex_groups`) et distingue les groupes hybrides (`X25519MLKEM768`,
+  `SecP256r1MLKEM768`, `SecP384r1MLKEM1024`) de ML-KEM seul, non conforme à la
+  position de l’ANSSI (`pqc_kex_status = pure`, constat `PQC_KEX_NOT_HYBRID`).
+  `pqc_hybrid` et `pqc_hybrid_level` (`complete`, `key_exchange`, `signature`,
+  `none`) signalent l’adoption de l’hybridation, échange de clés et signature
+  du certificat. Le modèle de note passe en v2 : +10 points sur l’échange de
+  clés avec un groupe hybride, et A+ exige HSTS et l’échange de clés hybride.

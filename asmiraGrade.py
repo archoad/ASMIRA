@@ -11,7 +11,13 @@ GRADE_VERSION, afin que l’historique reste comparable.
 import re
 
 
-GRADE_VERSION = '1'
+GRADE_VERSION = '2'
+
+# Groupes d’échange de clés hybrides : ML-KEM associé à un algorithme classique,
+# l’approche exigée par l’ANSSI. Dupliqué de webTLS pour garder ce module sans
+# dépendance.
+PQC_HYBRID_KEX_GROUPS = ('X25519MLKEM768', 'SecP256r1MLKEM768', 'SecP384r1MLKEM1024')
+PQC_HYBRID_KEX_BONUS = 10
 
 # Ordre du meilleur au plus mauvais. T (confiance) et M (nom) sont des
 # problèmes de certificat : ils passent devant toute note cryptographique.
@@ -54,7 +60,8 @@ FINDINGS = {
 	'HSTS_MISSING': ('info', None, 'Ajouter l’en-tête Strict-Transport-Security (max-age ≥ 6 mois) pour viser A+.'),
 	'CERT_EXPIRES_30D': ('high', None, 'Le certificat expire dans moins de 30 jours : planifier le renouvellement.'),
 	'CERT_LIFETIME_OVER_398D': ('medium', None, 'Durée de vie supérieure à 398 jours : non conforme aux exigences CA/B Forum.'),
-	'NO_PQC_KEX': ('low', None, 'Activer l’échange de clés hybride X25519MLKEM768 en TLS 1.3 (OpenSSL ≥ 3.5, BoringSSL ou équivalent) contre le déchiffrement différé.'),
+	'NO_PQC_KEX': ('low', None, 'Activer un échange de clés hybride en TLS 1.3 (X25519MLKEM768, SecP256r1MLKEM768 ou SecP384r1MLKEM1024 ; OpenSSL ≥ 3.5, BoringSSL ou équivalent) contre le déchiffrement différé.'),
+	'PQC_KEX_NOT_HYBRID': ('medium', None, 'ML-KEM est proposé seul : l’ANSSI impose de l’associer à un algorithme classique. Proposer un groupe hybride (X25519MLKEM768, SecP256r1MLKEM768 ou SecP384r1MLKEM1024).'),
 	'RDP_EXPOSED': ('high', None, 'Le bureau à distance (RDP, 3389) est exposé sur Internet : le placer derrière un VPN ou une passerelle d’accès.'),
 	'CLEARTEXT_SERVICE': ('medium', None, 'Un service exposé n’offre pas de chiffrement (TLS ou STARTTLS) : l’activer ou le fermer.'),
 	'CAA_ISSUER_NOT_AUTHORIZED': ('high', None, 'Le CAA n’autorise pas l’autorité qui a émis le certificat actuel : le prochain renouvellement échouera. Aligner le CAA ou changer d’autorité.'),
@@ -158,6 +165,21 @@ def keyScore(strength):
 	return(100)
 
 
+def kexClass(item):
+	"""Échange de clés post-quantique d’un couple FQDN/IP : hybrid, pure,
+	none ou None si la sonde n’a rien établi."""
+	groups = item.get('pqc_kex_groups')
+	if not isinstance(groups, list):
+		groups = [item['pqc_kex_group']] if item.get('pqc_kex_group') else []
+	if any(group in PQC_HYBRID_KEX_GROUPS for group in groups):
+		return('hybrid')
+	if groups or item.get('pqc_kex_supported') is True:
+		return('pure')
+	if item.get('pqc_kex_supported') is False:
+		return('none')
+	return(None)
+
+
 def endpointVersions(item):
 	versions = [
 		version
@@ -205,6 +227,10 @@ def gradeEndpoint(item):
 	)
 	strength = keyStrength(item.get('public_key'), item.get('key_size'))
 	keyExchangeScore = keyScore(strength)
+	kex = kexClass(item)
+	if kex == 'hybrid' and keyExchangeScore is not None:
+		# v2 : l’échange de clés hybride ML-KEM renforce le sous-score.
+		keyExchangeScore = min(100, keyExchangeScore + PQC_HYBRID_KEX_BONUS)
 	bits = [value for value in (cipherBits(cipher) for cipher in ciphers) if value is not None]
 	cipherScore = (bitsScore(max(bits)) + bitsScore(min(bits))) / 2 if bits else None
 
@@ -265,8 +291,10 @@ def gradeEndpoint(item):
 	if isinstance(lifetime, int) and lifetime > MAX_CERTIFICATE_LIFETIME_DAYS:
 		findings.add('CERT_LIFETIME_OVER_398D')
 	# Hors notation SSL Labs : objectif PQC de l’entité, sans plafond.
-	if item.get('pqc_kex_supported') is False:
+	if kex == 'none':
 		findings.add('NO_PQC_KEX')
+	elif kex == 'pure':
+		findings.add('PQC_KEX_NOT_HYBRID')
 	hstsMaxAge = item.get('hsts_max_age')
 	if not isinstance(hstsMaxAge, int) or hstsMaxAge < HSTS_MIN_AGE:
 		findings.add('HSTS_MISSING')
@@ -279,7 +307,8 @@ def gradeEndpoint(item):
 			trustCaps.append(cap)
 		elif cap is not None:
 			grade = capGrade(grade, cap)
-	if grade == 'A' and not (findings & {'HSTS_MISSING', 'NO_TLS13'}):
+	# v2 : A+ exige HSTS et un échange de clés hybride sur l’adresse notée.
+	if grade == 'A' and kex == 'hybrid' and not (findings & {'HSTS_MISSING', 'NO_TLS13'}):
 		grade = 'A+'
 	gradeIfTrusted = grade
 	if trustCaps:

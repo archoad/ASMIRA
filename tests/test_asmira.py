@@ -351,20 +351,62 @@ def testExposureEventsCarryCaaAndFlagUnauthorizedIssuer():
 	assert 'high' in exposure['tls']['findings_severity']
 
 
-@pytest.mark.parametrize('supports, tls13, expected', [
-	([True, True], True, 'hybrid'),
-	([True, False], True, 'partial'),
-	([False, False], True, 'classical'),
-	([False], False, 'no_tls13'),
-	([False, None], True, 'unknown'),
+HYBRID = {'pqc_kex_supported': True, 'pqc_kex_groups': ['X25519MLKEM768'], 'pqc_kex_hybrid': True}
+PURE = {'pqc_kex_supported': True, 'pqc_kex_groups': ['MLKEM1024'], 'pqc_kex_hybrid': False}
+NONE = {'pqc_kex_supported': False, 'pqc_kex_groups': [], 'pqc_kex_hybrid': False}
+UNKNOWN = {'pqc_kex_supported': None}
+
+
+@pytest.mark.parametrize('probes, tls13, expected', [
+	([HYBRID, HYBRID], True, 'hybrid'),
+	([PURE], True, 'pure'),
+	([HYBRID, PURE], True, 'partial'),
+	([HYBRID, NONE], True, 'partial'),
+	([NONE, NONE], True, 'classical'),
+	([NONE], False, 'no_tls13'),
+	([NONE, UNKNOWN], True, 'unknown'),
 ])
-def testPqcKexStatus(supports, tls13, expected):
+def testPqcKexStatus(probes, tls13, expected):
 	items = [
-		gradedItem(pqc_kex_supported=value, **({} if tls13 else {'TLSv1.3': [], 'negotiated_protocol': 'TLSv1.2'}))
-		for value in supports
+		gradedItem(**probe, **({} if tls13 else {'TLSv1.3': [], 'negotiated_protocol': 'TLSv1.2'}))
+		for probe in probes
 	]
 
 	assert asmira.pqcKexStatus(items) == expected
+
+
+def testLegacyObservationWithSingleGroupIsClassified():
+	assert asmira.pqcKexStatus([gradedItem(pqc_kex_supported=True, pqc_kex_group='SecP384r1MLKEM1024')]) == 'hybrid'
+	assert asmira.pqcKexStatus([gradedItem(pqc_kex_supported=True, pqc_kex_group='MLKEM768')]) == 'pure'
+
+
+@pytest.mark.parametrize('kex, certificate, level', [
+	('hybrid', ['hybrid'], 'complete'),
+	('hybrid', ['classical'], 'key_exchange'),
+	('classical', ['hybrid'], 'signature'),
+	('pure', ['pqc'], 'none'),
+	('hybrid', [], 'key_exchange'),
+])
+def testPqcHybridLevel(kex, certificate, level):
+	assert asmira.pqcHybridLevel(kex, certificate) == level
+
+
+def testExposureEventsFlagHybridAdoptionAndAcceptedGroups():
+	event = asmira.buildExposureEvents([gradedItem(
+		negotiated_group='X25519MLKEM768',
+		pqc_kex_supported=True,
+		pqc_kex_hybrid=True,
+		pqc_kex_groups=['X25519MLKEM768', 'MLKEM1024'],
+		hsts_max_age=31536000,
+	)], '20260731T200000Z-12345678')[0]
+	tls = event['asmira']['exposure']['tls']
+
+	assert tls['pqc_kex_status'] == 'hybrid'
+	assert tls['pqc_kex_groups'] == ['MLKEM1024', 'X25519MLKEM768']
+	assert tls['pqc_kex_preferred'] is True
+	assert tls['pqc_hybrid'] is True
+	assert tls['pqc_hybrid_level'] == 'key_exchange'
+	assert tls['grade'] == 'A+'
 
 
 def testExposureEventsCarryPqcKexAndFinding():

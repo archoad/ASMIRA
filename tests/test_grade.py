@@ -29,6 +29,8 @@ def endpoint(**overrides):
 		'remain': 200,
 		'certificate_lifetime_days': 90,
 		'hsts_max_age': 31536000,
+		'pqc_kex_supported': True,
+		'pqc_kex_groups': ['X25519MLKEM768'],
 	}
 	item.update(overrides)
 	return(item)
@@ -172,3 +174,40 @@ def testEveryFindingHasKnownSeverityAndCap():
 		assert severity in asmiraGrade.SEVERITY_ORDER
 		assert cap is None or cap in asmiraGrade.GRADE_ORDER
 		assert remediation
+
+
+def testA_PlusRequiresHybridKeyExchange():
+	result = asmiraGrade.gradeEndpoint(endpoint(pqc_kex_supported=False, pqc_kex_groups=[]))
+
+	assert result['grade'] == 'A'
+	assert 'NO_PQC_KEX' in result['findings']
+
+
+def testPureMlKemIsNotHybridAndBlocksAPlus():
+	result = asmiraGrade.gradeEndpoint(endpoint(pqc_kex_groups=['MLKEM1024']))
+
+	assert result['grade'] == 'A'
+	assert 'PQC_KEX_NOT_HYBRID' in result['findings']
+	assert 'NO_PQC_KEX' not in result['findings']
+
+
+@pytest.mark.parametrize('group', ['X25519MLKEM768', 'SecP256r1MLKEM768', 'SecP384r1MLKEM1024'])
+def testEveryHybridGroupCounts(group):
+	result = asmiraGrade.gradeEndpoint(endpoint(pqc_kex_groups=[group]))
+
+	assert result['grade'] == 'A+'
+
+
+def testHybridKeyExchangeRaisesKeyExchangeScore():
+	hybrid = asmiraGrade.gradeEndpoint(endpoint(key_size=2048))
+	classical = asmiraGrade.gradeEndpoint(endpoint(key_size=2048, pqc_kex_supported=False, pqc_kex_groups=[]))
+
+	assert hybrid['key_exchange_score'] == classical['key_exchange_score'] + asmiraGrade.PQC_HYBRID_KEX_BONUS
+	assert hybrid['score'] > classical['score']
+
+
+def testUnknownKeyExchangeBlocksAPlusWithoutFinding():
+	result = asmiraGrade.gradeEndpoint(endpoint(pqc_kex_supported=None, pqc_kex_groups=None))
+
+	assert result['grade'] == 'A'
+	assert not {'NO_PQC_KEX', 'PQC_KEX_NOT_HYBRID'} & set(result['findings'])

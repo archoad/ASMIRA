@@ -77,15 +77,20 @@ IMPLICIT_TLS_PORTS = (443, 465, 993, 995, 8080, 8443)
 # Ports où TLS s’obtient par STARTTLS, avec le protocole attendu par OpenSSL.
 STARTTLS_PORTS = {25: 'smtp', 587: 'smtp'}
 PORT_PROBE_TIMEOUT = 5
-# Groupes d’échange de clés post-quantiques (hybrides puis purs) connus d’OpenSSL 3.5.
-PQC_KEX_GROUPS = (
+# Groupes d’échange de clés post-quantiques connus d’OpenSSL 3.5. Les groupes
+# hybrides associent ML-KEM (FIPS 203) à un algorithme classique, comme l’exige
+# l’ANSSI ; les groupes ML-KEM seuls ne satisfont pas cette exigence.
+PQC_HYBRID_KEX_GROUPS = (
 	'X25519MLKEM768',
 	'SecP256r1MLKEM768',
 	'SecP384r1MLKEM1024',
+)
+PQC_PURE_KEX_GROUPS = (
+	'MLKEM512',
 	'MLKEM768',
 	'MLKEM1024',
-	'MLKEM512',
 )
+PQC_KEX_GROUPS = PQC_HYBRID_KEX_GROUPS + PQC_PURE_KEX_GROUPS
 MANAGED_PICTURE_PREFIXES = ('graph_', 'screenshot_')
 PQC_ALGORITHMS_BY_OID = {
 	**{
@@ -434,8 +439,8 @@ def extractNegotiatedGroup(data):
 	return(kind)
 
 
-def testPqcKeyExchange(hostip, host, commandSemaphore=None):
-	"""Force une négociation TLS 1.3 limitée aux groupes ML-KEM. Renvoie le groupe
+def testPqcKeyExchange(hostip, host, commandSemaphore=None, groups=PQC_KEX_GROUPS):
+	"""Force une négociation TLS 1.3 limitée aux groupes indiqués. Renvoie le groupe
 	accepté, False si le serveur les refuse, None si la sonde n’a pas abouti."""
 	cmd = [
 		dicTools['openssl'],
@@ -446,7 +451,7 @@ def testPqcKeyExchange(hostip, host, commandSemaphore=None):
 		host,
 		'-tls1_3',
 		'-groups',
-		':'.join(PQC_KEX_GROUPS),
+		':'.join(groups),
 	]
 	try:
 		with commandSlot(commandSemaphore):
@@ -1446,16 +1451,46 @@ def analysePortEncryption(item, ip, host, commandSemaphore=None):
 
 
 def analysePqcKeyExchange(item, ip, host, commandSemaphore=None):
-	if item.get('negotiated_group') in PQC_KEX_GROUPS:
-		return({'pqc_kex_group': item['negotiated_group'], 'pqc_kex_supported': True})
+	"""Groupes ML-KEM acceptés par le serveur, hybrides ou non.
+
+	Le groupe négocié par testTLS (OpenSSL 3.5 propose X25519MLKEM768 en premier)
+	ou une première sonde proposant tous les groupes établit le support ; chaque
+	autre groupe est alors testé seul pour dresser la liste complète. Un serveur
+	sans ML-KEM ne coûte qu’une sonde.
+	"""
+	negotiated = item.get('negotiated_group')
 	supportsTls13 = bool(item.get('TLSv1.3')) or item.get('negotiated_protocol') == 'TLSv1.3'
-	if not supportsTls13:
+	if negotiated in PQC_KEX_GROUPS:
+		first = negotiated
+	elif not supportsTls13:
 		# ML-KEM n’existe qu’en TLS 1.3 : inutile de sonder.
-		return({'pqc_kex_group': None, 'pqc_kex_supported': False if item.get('certificate_sha256') else None})
-	group = testPqcKeyExchange(ip, host, commandSemaphore=commandSemaphore)
+		return({
+			'pqc_kex_group': None,
+			'pqc_kex_groups': [],
+			'pqc_kex_supported': False if item.get('certificate_sha256') else None,
+			'pqc_kex_hybrid': False if item.get('certificate_sha256') else None,
+		})
+	else:
+		first = testPqcKeyExchange(ip, host, commandSemaphore=commandSemaphore)
+		if not first:
+			return({
+				'pqc_kex_group': None,
+				'pqc_kex_groups': [],
+				'pqc_kex_supported': None if first is None else False,
+				'pqc_kex_hybrid': None if first is None else False,
+			})
+	accepted = {first}
+	for group in PQC_KEX_GROUPS:
+		if group == first:
+			continue
+		if testPqcKeyExchange(ip, host, commandSemaphore=commandSemaphore, groups=(group,)) == group:
+			accepted.add(group)
+	groups = [group for group in PQC_KEX_GROUPS if group in accepted]
 	return({
-		'pqc_kex_group': group or None,
-		'pqc_kex_supported': None if group is None else bool(group),
+		'pqc_kex_group': first,
+		'pqc_kex_groups': groups,
+		'pqc_kex_supported': True,
+		'pqc_kex_hybrid': any(group in PQC_HYBRID_KEX_GROUPS for group in groups),
 	})
 
 

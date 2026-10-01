@@ -52,7 +52,7 @@ def testElasticJsonAssetsAreValidAndDashboardIsGlobal():
 	assert fqdnTransform['dest']['index'] == 'asmira-fqdn-latest'
 	assert 'retention_policy' not in fqdnTransform
 	assert dashboard['title'] == '[archoad] Asmira — Surface d’exposition globale'
-	assert len(dashboard['panels']) == 49
+	assert len(dashboard['panels']) == 51
 	controls = dashboard['pinned_panels']
 	assert [control['config']['title'] for control in controls] == ['Domaine', 'FQDN']
 	assert [control['config']['field_name'] for control in controls] == [
@@ -105,6 +105,8 @@ def testElasticJsonAssetsAreValidAndDashboardIsGlobal():
 		'Ports ouverts',
 		'Chiffrement des services exposés',
 		'Services exposés sans chiffrement',
+		'Approche hybride post-quantique (ANSSI)',
+		'Groupes ML-KEM acceptés',
 	}
 	assert 'Erreurs récentes de cartographie' not in {
 		panel['config'].get('title')

@@ -163,21 +163,44 @@ def addFindings(tls, codes):
 
 
 def pqcKexStatus(items):
+	"""hybrid (toutes les adresses proposent un groupe hybride, approche ANSSI),
+	pure (ML-KEM seul partout), partial, classical, no_tls13 ou unknown."""
 	tlsItems = [item for item in items if item.get('port443') == 'open' and item.get('certificate_sha256')]
 	if not tlsItems:
 		return(None)
-	support = [item.get('pqc_kex_supported') for item in tlsItems]
-	if all(value is True for value in support):
+	classes = [asmiraGrade.kexClass(item) for item in tlsItems]
+	if all(value == 'hybrid' for value in classes):
 		return('hybrid')
-	if any(value is True for value in support):
+	if all(value == 'pure' for value in classes):
+		return('pure')
+	if any(value in ('hybrid', 'pure') for value in classes):
 		return('partial')
-	if any(value is None for value in support):
+	if any(value is None for value in classes):
 		return('unknown')
 	hasTls13 = any(
 		item.get('TLSv1.3') or item.get('negotiated_protocol') == 'TLSv1.3'
 		for item in tlsItems
 	)
 	return('classical' if hasTls13 else 'no_tls13')
+
+
+def tlsItemsOf(items):
+	return([item for item in items if item.get('port443') == 'open' and item.get('certificate_sha256')])
+
+
+def pqcHybridLevel(kexStatus, certificatePqcStatuses):
+	"""Adoption de l’approche hybride : échange de clés et signature du certificat."""
+	kex = kexStatus == 'hybrid'
+	signature = bool(certificatePqcStatuses) and all(
+		status == 'hybrid' for status in certificatePqcStatuses
+	)
+	if kex and signature:
+		return('complete')
+	if kex:
+		return('key_exchange')
+	if signature:
+		return('signature')
+	return('none')
 
 
 def parseFindingsSince(values):
@@ -627,7 +650,12 @@ def buildFqdnObservation(items, runId):
 				'hsts_max_age': itemValues(items, 'hsts_max_age'),
 				'negotiated_group': itemValues(items, 'negotiated_group'),
 				'pqc_kex_group': itemValues(items, 'pqc_kex_group'),
+				'pqc_kex_groups': itemListValues(items, 'pqc_kex_groups'),
 				'pqc_kex_status': pqcKexStatus(items),
+				'pqc_kex_preferred': (
+					all(item.get('negotiated_group') in asmiraGrade.PQC_HYBRID_KEX_GROUPS for item in tlsItemsOf(items))
+					if tlsItemsOf(items) else None
+				),
 				'certificate_changed': False,
 				'pqc_status_changed': False,
 				'previous_certificate_sha256': [],
@@ -643,6 +671,12 @@ def buildFqdnObservation(items, runId):
 	})
 	exposure = event['asmira']['exposure']
 	tls = exposure['tls']
+	if tls['pqc_kex_status'] is not None:
+		tls['pqc_hybrid_level'] = pqcHybridLevel(
+			tls['pqc_kex_status'],
+			[status for status in tls['certificate_pqc_status'] if status != 'unknown'],
+		)
+		tls['pqc_hybrid'] = tls['pqc_kex_status'] == 'hybrid'
 	if caa is not None:
 		exposure['dns'] = {'caa': caa}
 	if grading is not None:

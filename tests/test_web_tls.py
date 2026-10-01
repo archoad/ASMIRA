@@ -472,15 +472,66 @@ def testPqcKeyExchangeProbe(monkeypatch, output, expected):
 	assert commands[0][commands[0].index('-groups') + 1].startswith('X25519MLKEM768:')
 
 
-def testPqcAnalysisSkipsProbeWhenAlreadyNegotiatedOrWithoutTls13(monkeypatch):
+def testPqcAnalysisWithoutTls13DoesNotProbe(monkeypatch):
 	monkeypatch.setattr(webTLS, 'testPqcKeyExchange', lambda *args, **kwargs: pytest.fail('sonde inutile'))
 
 	assert webTLS.analysePqcKeyExchange(
-		{'negotiated_group': 'X25519MLKEM768'}, '192.0.2.1', 'www.example.com',
-	) == {'pqc_kex_group': 'X25519MLKEM768', 'pqc_kex_supported': True}
-	assert webTLS.analysePqcKeyExchange(
 		{'TLSv1.2': ['x'], 'certificate_sha256': 'a'}, '192.0.2.1', 'www.example.com',
-	) == {'pqc_kex_group': None, 'pqc_kex_supported': False}
+	) == {'pqc_kex_group': None, 'pqc_kex_groups': [], 'pqc_kex_supported': False, 'pqc_kex_hybrid': False}
+
+
+def testPqcAnalysisEnumeratesEveryAcceptedGroup(monkeypatch):
+	accepted = {'X25519MLKEM768', 'MLKEM1024'}
+	probes = []
+
+	def fakeProbe(ip, host, commandSemaphore=None, groups=webTLS.PQC_KEX_GROUPS):
+		probes.append(groups)
+		return(groups[0] if len(groups) == 1 and groups[0] in accepted else False)
+
+	monkeypatch.setattr(webTLS, 'testPqcKeyExchange', fakeProbe)
+
+	result = webTLS.analysePqcKeyExchange(
+		{'negotiated_group': 'X25519MLKEM768', 'TLSv1.3': ['x']}, '192.0.2.1', 'www.example.com',
+	)
+
+	assert result == {
+		'pqc_kex_group': 'X25519MLKEM768',
+		'pqc_kex_groups': ['X25519MLKEM768', 'MLKEM1024'],
+		'pqc_kex_supported': True,
+		'pqc_kex_hybrid': True,
+	}
+	assert len(probes) == len(webTLS.PQC_KEX_GROUPS) - 1
+
+
+def testPqcAnalysisDetectsPureMlKemOnly(monkeypatch):
+	def fakeProbe(ip, host, commandSemaphore=None, groups=webTLS.PQC_KEX_GROUPS):
+		if len(groups) > 1:
+			return('MLKEM768')
+		return('MLKEM768' if groups == ('MLKEM768',) else False)
+
+	monkeypatch.setattr(webTLS, 'testPqcKeyExchange', fakeProbe)
+
+	result = webTLS.analysePqcKeyExchange(
+		{'negotiated_group': 'secp384r1', 'TLSv1.3': ['x']}, '192.0.2.1', 'www.example.com',
+	)
+
+	assert result['pqc_kex_groups'] == ['MLKEM768']
+	assert result['pqc_kex_hybrid'] is False
+
+
+def testPqcAnalysisWithoutAnyGroupCostsOneProbe(monkeypatch):
+	probes = []
+	monkeypatch.setattr(
+		webTLS, 'testPqcKeyExchange',
+		lambda *args, **kwargs: probes.append(kwargs.get('groups')) or False,
+	)
+
+	result = webTLS.analysePqcKeyExchange(
+		{'negotiated_group': 'X25519', 'TLSv1.3': ['x']}, '192.0.2.1', 'www.example.com',
+	)
+
+	assert result['pqc_kex_supported'] is False
+	assert len(probes) == 1
 
 
 @pytest.mark.parametrize('port, output, expected', [

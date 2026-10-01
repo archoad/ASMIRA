@@ -100,12 +100,13 @@ correction associé. Le modèle s’inspire du
 sans prétendre le reproduire : il ne note que ce que la sonde observe.
 
 - **Score** : protocoles 30 %, échange de clés 30 %, chiffrement 40 %. Les
-  seuils A ≥ 80, B ≥ 65, C ≥ 50, D ≥ 35, E ≥ 20 sont ceux du guide.
+  seuils A ≥ 80, B ≥ 65, C ≥ 50, D ≥ 35, E ≥ 20 sont ceux du guide. Un échange
+  de clés hybride ML-KEM ajoute 10 points au sous-score d’échange de clés.
 - **Plafonds** : suites NULL, EXPORT ou anonymes, clé < 1024 bits ou signature
   MD5 → F ; SSLv3, RC4 ou suites à blocs de 64 bits → C ; TLS 1.0 ou 1.1, absence
   de confidentialité persistante ou d’AEAD, clé RSA < 2048 bits ou signature
-  SHA-1 → B ; absence de TLS 1.3 → A- ; A sans réserve et HSTS d’au moins six
-  mois → A+.
+  SHA-1 → B ; absence de TLS 1.3 → A- ; A sans réserve, HSTS d’au moins six
+  mois et échange de clés hybride → A+.
 - **Certificat** : T si le certificat est expiré, auto-signé ou si la chaîne
   n’est pas reconnue ; M si le nom n’est pas couvert. La note cryptographique
   reste disponible dans `grade_if_trusted`.
@@ -126,9 +127,13 @@ Toute modification des seuils ou des plafonds impose d’incrémenter
   (RFC 8659), avec les autorités autorisées et l’existence connue d’une offre
   ACME. `CAA_ISSUER_NOT_AUTHORIZED` signale un certificat dont l’émetteur n’est
   pas autorisé par le CAA.
-- **PQC** : l’échange de clés hybride ML-KEM (`X25519MLKEM768`…) est mesuré par
-  négociation TLS 1.3 réelle ; le statut PQC du certificat X.509 reste suivi à
-  part.
+- **PQC** : conformément à la position de l’ANSSI, seule l’association d’un
+  algorithme classique et d’un algorithme post-quantique normalisé est jugée
+  conforme. Chaque groupe TLS 1.3 (`X25519MLKEM768`, `SecP256r1MLKEM768`,
+  `SecP384r1MLKEM1024`, ML-KEM seul) est testé par une négociation réelle. Les
+  indicateurs `pqc_hybrid` et `pqc_hybrid_level` signalent les FQDN qui ont
+  adopté l’approche hybride, pour l’échange de clés et la signature du
+  certificat (ML-DSA composite).
 - **Suivi des constats** : chaque constat est daté de sa première observation ;
   chaque run indique les constats apparus et corrigés.
 
