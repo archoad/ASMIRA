@@ -536,8 +536,9 @@ def testPqcAnalysisWithoutAnyGroupCostsOneProbe(monkeypatch):
 
 @pytest.mark.parametrize('port, output, expected', [
 	(993, b'CONNECTED(00000003)\nNew, TLSv1.3, Cipher is TLS_AES_256_GCM_SHA384\n', 'tls'),
-	(587, b'CONNECTED(00000003)\nNew, TLSv1.3, Cipher is TLS_AES_256_GCM_SHA384\n', 'starttls'),
 	(8080, b'CONNECTED(00000003)\nerror:0A00010B:SSL routines::wrong version number\n', 'clear'),
+	(443, b'CONNECTED(00000003)\nssl/tls alert handshake failure:SSL alert number 40\n', 'tls'),
+	(465, b'write:errno=104\nCONNECTED(00000003)\nNew, (NONE), Cipher is (NONE)\n', None),
 	(465, b'connect:errno=111\n', None),
 	(3389, b'| rdp-enum-encryption:\n|   Security layer\n|     CredSSP (NLA): SUCCESS\n', 'tls'),
 	(3389, b'| rdp-enum-encryption:\n|   Security layer\n|     Native RDP: SUCCESS\n', 'clear'),
@@ -552,17 +553,96 @@ def testPortEncryptionProbe(monkeypatch, port, output, expected):
 	monkeypatch.setattr(webTLS.subprocess, 'run', fakeRun)
 
 	assert webTLS.testPortEncryption('192.0.2.1', 'mail.example.com', port) == expected
-	if port == 587:
-		assert commands[0][-2:] == ['-starttls', 'smtp']
 
 
-def testSilentEstablishedConnectionIsCleartext(monkeypatch):
+def testSilentEstablishedConnectionIsUndetermined(monkeypatch):
+	# Derrière un CDN, un port peut accepter la connexion TCP sans rien servir.
 	def fakeRun(command, **kwargs):
 		raise subprocess.TimeoutExpired(command, 5, output=b'CONNECTED(00000003)\n')
 
 	monkeypatch.setattr(webTLS.subprocess, 'run', fakeRun)
 
-	assert webTLS.testPortEncryption('192.0.2.1', 'www.example.com', 8443) == 'clear'
+	assert webTLS.testPortEncryption('192.0.2.1', 'www.example.com', 8443) is None
+
+
+@pytest.mark.parametrize('offered, output, expected', [
+	(True, b'CONNECTED(00000003)\nNew, TLSv1.3, Cipher is TLS_AES_256_GCM_SHA384\n', 'starttls'),
+	(False, None, 'clear'),
+	(None, None, None),
+])
+def testSmtpEncryptionRequiresABanner(monkeypatch, offered, output, expected):
+	commands = []
+	monkeypatch.setattr(webTLS, 'smtpOffersStartTls', lambda ip, port: offered)
+
+	def fakeRun(command, **kwargs):
+		commands.append(command)
+		return(SimpleNamespace(stdout=output))
+
+	monkeypatch.setattr(webTLS.subprocess, 'run', fakeRun)
+
+	assert webTLS.testPortEncryption('192.0.2.1', 'mail.example.com', 587) == expected
+	if offered:
+		assert commands[0][-2:] == ['-starttls', 'smtp']
+	else:
+		assert commands == []
+
+
+class FakeSmtpConnection:
+	def __init__(self, replies):
+		self.replies = replies
+		self.sent = []
+
+	def makefile(self, mode):
+		import io
+		return(io.BytesIO(self.replies))
+
+	def sendall(self, data):
+		self.sent.append(data)
+
+	def settimeout(self, value):
+		self.timeouts = getattr(self, 'timeouts', []) + [value]
+
+	def __enter__(self):
+		return(self)
+
+	def __exit__(self, *args):
+		return(False)
+
+
+@pytest.mark.parametrize('replies, expected', [
+	(b'220 mx.example.com ESMTP\r\n250-mx.example.com\r\n250-SIZE 1000\r\n250 STARTTLS\r\n', True),
+	(b'220-mx.example.com\r\n220 ESMTP\r\n250-mx.example.com\r\n250 SIZE 1000\r\n', False),
+	(b'220 mx.example.com ESMTP\r\n250-mx.example.com\r\n250 X-NO-STARTTLS\r\n', False),
+	(b'', None),
+	(b'HTTP/1.1 400 Bad Request\r\n', None),
+])
+def testSmtpOffersStartTls(monkeypatch, replies, expected):
+	connection = FakeSmtpConnection(replies)
+	monkeypatch.setattr(webTLS.socket, 'create_connection', lambda *args, **kwargs: connection)
+
+	assert webTLS.smtpOffersStartTls('192.0.2.1', 25) is expected
+	if expected is not None:
+		assert connection.sent[0] == b'EHLO asmira.invalid\r\n'
+
+
+@pytest.mark.parametrize('replies', [
+	b'220 ' + b'x' * 5000 + b'\r\n',
+	b'220-' + b'y' * 900 + b'\r\n' + (b'220-' + b'z' * 900 + b'\r\n') * 30,
+])
+def testSmtpProbeBoundsLineAndReplySize(monkeypatch, replies):
+	monkeypatch.setattr(webTLS.socket, 'create_connection', lambda *args, **kwargs: FakeSmtpConnection(replies))
+
+	assert webTLS.smtpOffersStartTls('192.0.2.1', 25) is None
+
+
+def testSmtpProbeHonoursGlobalDeadline(monkeypatch):
+	clock = iter([0.0, 0.0, 10.0])
+	monkeypatch.setattr(webTLS.time, 'monotonic', lambda: next(clock, 10.0))
+	connection = FakeSmtpConnection(b'220 mx.example.com ESMTP\r\n250-mx.example.com\r\n250 STARTTLS\r\n')
+	monkeypatch.setattr(webTLS.socket, 'create_connection', lambda *args, **kwargs: connection)
+
+	assert webTLS.smtpOffersStartTls('192.0.2.1', 25, timeout=5) is None
+	assert connection.timeouts[0] == 5
 
 
 def testUnreachablePortStaysUndetermined(monkeypatch):

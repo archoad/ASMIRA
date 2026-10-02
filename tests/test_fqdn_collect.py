@@ -624,39 +624,267 @@ def testCertSpotterRestartsFromScratchOnCorruptState(tmp_path):
 	assert json.loads(stateFile.read_text())['domains']['example.com']['complete'] is True
 
 
-def testAmassCollectorUsesExplicitActiveMode(tmp_path, monkeypatch):
+def amassExecutable(tmp_path):
 	executable = tmp_path / 'amass'
 	executable.touch(mode=0o700)
+	return(executable)
+
+
+def testAmassCollectorParsesV4RelationsWithinScope(tmp_path, monkeypatch):
 	commands = []
 
 	def fakeRun(cmd, **kwargs):
 		commands.append(cmd)
-		if 'subs' in cmd:
-			outputFile = Path(cmd[cmd.index('-o') + 1])
-			outputFile.write_text('vpn.example.com\n')
+		outputFile = Path(cmd[cmd.index('-o') + 1])
+		outputFile.write_text(
+			'example.com (FQDN) --> ns_record --> ns1.dns-provider.net (FQDN)\n'
+			'vpn.example.com (FQDN) --> a_record --> 192.0.2.10 (IPAddress)\n'
+			'WWW.Example.com (FQDN) --> cname_record --> edge.cdn.example.net (FQDN)\n'
+			'vpn.example.com (FQDN) --> aaaa_record --> 2001:db8::1 (IPAddress)\n'
+			'64496 (ASN) --> announces --> 192.0.2.0/24 (Netblock)\n'
+		)
 		return SimpleNamespace(returncode=0, stderr='')
 
 	monkeypatch.setattr(fqdnCollect.subprocess, 'run', fakeRun)
-	collector = fqdnCollect.AmassCollector(
-		path=executable,
-		timeout=60,
-		workDir=tmp_path,
-	)
+	collector = fqdnCollect.AmassCollector(path=amassExecutable(tmp_path), timeout=60, workDir=tmp_path)
 
 	findings = collector.collect('example.com')
 
-	assert '-active' in commands[0]
-	assert '-brute' in commands[0]
-	assert commands[1][1] == 'subs'
-	assert '-names' in commands[1]
-	assert [(item.name, item.source) for item in findings] == [
-		('vpn.example.com', 'amass'),
-	]
+	assert commands[0][1] == 'enum'
+	assert {'-active', '-brute', '-o'} <= set(commands[0])
+	assert len(commands) == 1
+	assert sorted(item.name for item in findings) == ['example.com', 'vpn.example.com', 'www.example.com']
+	assert {item.source for item in findings} == {'amass'}
+
+
+@pytest.mark.parametrize('versionOutput, available', [
+	('v4.2.0\n', True),
+	('v5.1.1\n', False),
+	('erreur', False),
+])
+def testAmassAvailabilityRequiresVersion4(tmp_path, monkeypatch, versionOutput, available):
+	monkeypatch.setattr(
+		fqdnCollect.subprocess, 'run',
+		lambda cmd, **kwargs: SimpleNamespace(returncode=0, stdout=versionOutput),
+	)
+	collector = fqdnCollect.AmassCollector(path=amassExecutable(tmp_path), timeout=60, workDir=tmp_path)
+
+	ok, reason = collector.availability()
+
+	assert ok is available
+	if not available:
+		assert 'v4.2.0' in reason
 
 
 def testParseSourcesRequiresDedicatedAmassFlag():
 	with pytest.raises(ValueError, match='--enable-amass'):
 		fqdnCollect.parseSourceNames('shodan-ctl,amass')
+
+
+def dnsxCollector(tmp_path, **kwargs):
+	executable = tmp_path / 'dnsx'
+	executable.touch(mode=0o700)
+	wordlist = tmp_path / 'words.txt'
+	wordlist.write_text('# commentaire\nwww\nAPI\n\nvpn\n', encoding='utf-8')
+	options = {
+		'path': executable,
+		'wordlist': wordlist,
+		'resolvers': ['192.0.2.53'],
+		'timeout': 60,
+		'workDir': tmp_path,
+		'labelFactory': iter(['probe-1', 'probe-2']).__next__,
+	}
+	options.update(kwargs)
+	return(fqdnCollect.DnsxCollector(**options))
+
+
+def dnsxLine(host, status='NOERROR', **records):
+	return(json.dumps({'host': host, 'status_code': status, **records}) + '\n')
+
+
+def fakeDnsxRun(commands, axfrOutput='', bruteOutput='', bruteTimeout=False):
+	def fakeRun(cmd, **kwargs):
+		commands.append((cmd, Path(cmd[cmd.index('-w') + 1]).read_text() if '-w' in cmd else None))
+		outputFile = Path(cmd[cmd.index('-o') + 1])
+		if '-axfr' in cmd:
+			outputFile.write_text(axfrOutput)
+		else:
+			outputFile.write_text(bruteOutput)
+			if bruteTimeout:
+				raise subprocess.TimeoutExpired(cmd, kwargs['timeout'])
+		return SimpleNamespace(returncode=0, stderr='')
+	return(fakeRun)
+
+
+def testDnsxCollectorKeepsResolvedBruteforceNamesOnly(tmp_path, monkeypatch):
+	commands = []
+	monkeypatch.setattr(fqdnCollect.subprocess, 'run', fakeDnsxRun(commands, bruteOutput=(
+		dnsxLine('www.example.com', a=['192.0.2.10'])
+		+ dnsxLine('api.example.com', cname=['edge.cdn.example.net'])
+		+ dnsxLine('vpn.example.com', status='NXDOMAIN')
+		+ dnsxLine('ftp.example.com', status='REFUSED', a=['198.51.100.1'])
+		+ dnsxLine('mail.example.com', soa=[{'name': 'example.com'}])
+		+ '{"host": "tronqué'
+	)))
+	collector = dnsxCollector(tmp_path)
+
+	findings = collector.collect('example.com')
+
+	assert sorted(item.name for item in findings) == ['api.example.com', 'www.example.com']
+	assert {item.source for item in findings} == {'dnsx'}
+	assert {item.evidence['method'] for item in findings} == {'bruteforce'}
+	axfrCommand, bruteCommand = commands[0][0], commands[1][0]
+	assert '-axfr' in axfrCommand
+	assert bruteCommand[bruteCommand.index('-d') + 1] == 'example.com'
+	# Jamais les résolveurs intégrés de dnsx ni la vérification de mise à jour.
+	assert bruteCommand[bruteCommand.index('-r') + 1] == '192.0.2.53'
+	assert '-duc' in bruteCommand and '-duc' in axfrCommand
+	assert commands[1][1].split() == ['www', 'api', 'vpn', 'probe-1', 'probe-2']
+	assert not list(tmp_path.glob('.dnsx_*'))
+
+
+def testDnsxCollectorDiscardsWildcardAnswers(tmp_path, monkeypatch):
+	monkeypatch.setattr(fqdnCollect.subprocess, 'run', fakeDnsxRun([], bruteOutput=(
+		dnsxLine('probe-1.example.com', a=['203.0.113.7'])
+		+ dnsxLine('probe-2.example.com', a=['203.0.113.7'])
+		+ dnsxLine('www.example.com', a=['203.0.113.7'])
+		+ dnsxLine('vpn.example.com', a=['192.0.2.20'])
+	)))
+
+	findings = dnsxCollector(tmp_path).collect('example.com')
+
+	assert [item.name for item in findings] == ['vpn.example.com']
+
+
+def testDnsxCollectorAggregatesCompleteWildcardSignature(tmp_path, monkeypatch):
+	monkeypatch.setattr(fqdnCollect.subprocess, 'run', fakeDnsxRun([], bruteOutput=(
+		dnsxLine('probe-1.example.com', a=['203.0.113.7'])
+		+ dnsxLine('probe-1.example.com', aaaa=['2001:db8::7'])
+		+ dnsxLine('probe-2.example.com', a=['203.0.113.7'])
+		+ dnsxLine('probe-2.example.com', aaaa=['2001:db8::7'])
+		+ dnsxLine('www.example.com', a=['203.0.113.7'])
+		+ dnsxLine('www.example.com', aaaa=['2001:db8::7'])
+	)))
+
+	assert dnsxCollector(tmp_path).collect('example.com') == []
+
+
+def testDnsxCollectorKeepsHostWithAdditionalRecordsBeyondWildcard(tmp_path, monkeypatch):
+	monkeypatch.setattr(fqdnCollect.subprocess, 'run', fakeDnsxRun([], bruteOutput=(
+		dnsxLine('probe-1.example.com', a=['203.0.113.7'])
+		+ dnsxLine('probe-2.example.com', a=['203.0.113.7'])
+		+ dnsxLine('www.example.com', a=['203.0.113.7', '192.0.2.42'])
+	)))
+
+	findings = dnsxCollector(tmp_path).collect('example.com')
+
+	assert [item.name for item in findings] == ['www.example.com']
+
+
+def testDnsxCollectorSharesOneTimeoutBudget(tmp_path, monkeypatch):
+	timeouts = []
+	clock = iter([0, 0, 150])
+	monkeypatch.setattr(fqdnCollect.time, 'monotonic', lambda: next(clock))
+
+	def fakeRun(cmd, **kwargs):
+		timeouts.append(kwargs['timeout'])
+		Path(cmd[cmd.index('-o') + 1]).write_text('', encoding='utf-8')
+		return(SimpleNamespace(returncode=0, stderr=''))
+
+	monkeypatch.setattr(fqdnCollect.subprocess, 'run', fakeRun)
+
+	dnsxCollector(tmp_path, timeout=600).collect('example.com')
+
+	assert timeouts == [120, 450]
+
+
+def testDnsxCollectorExtractsNamesFromZoneTransfer(tmp_path, monkeypatch):
+	axfr = json.dumps({'host': 'example.com', 'axfr': {'host': 'example.com', 'chain': [{
+		'host': 'example.com',
+		'all': [
+			'example.com.\t7200\tIN\tSOA\tns1.dns-provider.net. hostmaster.example.com. 1 2 3 4 5',
+			'example.com.\t7200\tIN\tNS\tns1.example.com.',
+			'example.com.\t7200\tIN\tMX\t10 mx.dns-provider.net.',
+			'intranet.example.com.\t300\tIN\tA\t10.0.0.5',
+			'portal.example.com.\t300\tIN\tCNAME\tbackend.example.com.',
+			'_sip._tcp.example.com.\t300\tIN\tSRV\t0 0 5060 voip.example.com.',
+			'*.dev.example.com.\t300\tIN\tA\t192.0.2.30',
+		],
+	}]}}) + '\n'
+	monkeypatch.setattr(fqdnCollect.subprocess, 'run', fakeDnsxRun([], axfrOutput=axfr))
+
+	findings = dnsxCollector(tmp_path).collect('example.com')
+
+	assert sorted(item.name for item in findings) == [
+		'*.dev.example.com', 'backend.example.com', 'example.com', 'intranet.example.com',
+		'ns1.example.com', 'portal.example.com', 'voip.example.com',
+	]
+	assert {item.evidence['method'] for item in findings} == {'axfr'}
+
+
+def testDnsxRefusedZoneTransferYieldsNothing(tmp_path, monkeypatch):
+	refused = json.dumps({'host': 'example.com', 'axfr': {'host': 'example.com'}}) + '\n'
+	monkeypatch.setattr(fqdnCollect.subprocess, 'run', fakeDnsxRun([], axfrOutput=refused))
+
+	assert dnsxCollector(tmp_path).collect('example.com') == []
+
+
+def testDnsxTimeoutKeepsPartialResultsAndFailsSource(tmp_path, monkeypatch):
+	monkeypatch.setattr(fqdnCollect.subprocess, 'run', fakeDnsxRun(
+		[],
+		bruteOutput=dnsxLine('www.example.com', a=['192.0.2.10']),
+		bruteTimeout=True,
+	))
+
+	findings, report = fqdnCollect.runCollector(dnsxCollector(tmp_path), 'example.com')
+
+	assert report['status'] == 'failed'
+	assert [item.name for item in findings] == ['www.example.com']
+
+
+def testDnsxFailureIsReported(tmp_path, monkeypatch):
+	monkeypatch.setattr(
+		fqdnCollect.subprocess, 'run',
+		lambda cmd, **kwargs: SimpleNamespace(returncode=1, stderr='flag provided but not defined'),
+	)
+
+	findings, report = fqdnCollect.runCollector(dnsxCollector(tmp_path), 'example.com')
+
+	assert findings == []
+	assert report['status'] == 'failed'
+	assert 'flag provided' in report['error']
+
+
+def testDnsxAvailabilityRequiresWordlist(tmp_path):
+	ok, reason = dnsxCollector(tmp_path, wordlist=None).availability()
+	assert ok is False and 'liste de mots' in reason
+
+	ok, reason = dnsxCollector(tmp_path, wordlist=tmp_path / 'absente.txt').availability()
+	assert ok is False and 'illisible' in reason
+
+
+def testDnsxFallsBackToSystemResolvers(tmp_path, monkeypatch):
+	monkeypatch.setattr(
+		fqdnCollect.dns.resolver, 'Resolver',
+		lambda configure=True: SimpleNamespace(nameservers=['192.0.2.1', '2001:db8::53']),
+	)
+	collector = dnsxCollector(tmp_path, resolvers=None)
+
+	assert collector.availability() == (True, None)
+	assert collector.resolvers == ['192.0.2.1', '[2001:db8::53]:53']
+
+
+def testParseDnsxResolversRejectsHostnames():
+	assert fqdnCollect.parseDnsxResolvers('192.0.2.1, 192.0.2.1,2001:db8::1') == [
+		'192.0.2.1', '[2001:db8::1]:53',
+	]
+	with pytest.raises(ValueError):
+		fqdnCollect.parseDnsxResolvers('resolver.example.net')
+
+
+def testParseSourcesRequiresDedicatedDnsxFlag():
+	with pytest.raises(ValueError, match='--enable-dnsx'):
+		fqdnCollect.parseSourceNames('subfinder,dnsx')
 
 
 def testDnsValidatorCollectsRecordsAndCanonicalName():
@@ -775,6 +1003,46 @@ def testMainRejectsInvalidWorkerCount():
 	assert fqdnCollect.main(['--dns-workers', '0']) == 2
 
 
+@pytest.mark.parametrize('activeFlag', ['--enable-amass', '--enable-dnsx'])
+def testMainRequiresExplicitTargetForActiveSources(activeFlag, monkeypatch, capsys):
+	monkeypatch.setattr(
+		fqdnCollect,
+		'hostCartography',
+		lambda *args, **kwargs: pytest.fail('la collecte ne doit pas démarrer'),
+	)
+
+	assert fqdnCollect.main(['--sources', '', activeFlag]) == 1
+	assert 'cible explicite est obligatoire' in capsys.readouterr().err
+
+
+def testMainKeepsDefaultTargetForPassiveCollection(monkeypatch):
+	captured = {}
+	monkeypatch.setattr(
+		fqdnCollect,
+		'hostCartography',
+		lambda hosts, **kwargs: captured.setdefault('hosts', hosts),
+	)
+
+	assert fqdnCollect.main(['--sources', '']) == 0
+	assert captured['hosts'] == list(fqdnCollect.DEFAULT_HOSTS)
+
+
+@pytest.mark.parametrize('wordlist', [None, '/definitely/missing/asmira-words.txt'])
+def testMainRequiresReadableDnsxWordlist(wordlist, monkeypatch, capsys):
+	monkeypatch.setattr(
+		fqdnCollect,
+		'hostCartography',
+		lambda *args, **kwargs: pytest.fail('la collecte ne doit pas démarrer'),
+	)
+	arguments = ['--sources', '', '--enable-dnsx']
+	if wordlist is not None:
+		arguments += ['--dnsx-wordlist', wordlist]
+	arguments.append('example.com')
+
+	assert fqdnCollect.main(arguments) == 1
+	assert '--dnsx-wordlist' in capsys.readouterr().err
+
+
 class CaaResolver:
 	def __init__(self, records, failing=()):
 		self.records = records
@@ -833,3 +1101,21 @@ def testCaaLookupsAreCachedAcrossHosts():
 	validator.effectiveCaa('b.example.com', 'example.com')
 
 	assert resolver.queries.count(('example.com', 'CAA')) == 1
+
+
+def testCertSpotterSessionLeavesRateLimitsToTheCollector():
+	collector = fqdnCollect.CertSpotterCollector()
+	retry = collector.session.get_adapter('https://api.certspotter.com').max_retries
+
+	assert retry.respect_retry_after_header is False
+	assert 429 not in retry.status_forcelist
+
+
+@pytest.mark.parametrize('host', ['https://admin.example.com/path', 'admin.example.com'])
+def testActiveSourcesRefuseTargetsBroaderThanAuthorised(host, capsys):
+	assert fqdnCollect.main(['--sources', 'shodan-ctl', '--enable-amass', host]) == 1
+	assert 'n’est pas un domaine enregistré' in capsys.readouterr().err
+
+
+def testRequireRegisteredDomainAcceptsExactDomain():
+	assert fqdnCollect.requireRegisteredDomain('Example.COM') == 'example.com'

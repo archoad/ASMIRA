@@ -62,6 +62,67 @@ def testLoadConfigRejectsSecrets(tmp_path):
 		asmiraCommon.loadConfig(configFile)
 
 
+def testLoadConfigParsesDnsxOptions(tmp_path):
+	configFile = tmp_path / 'asmira.conf'
+	wordlist = tmp_path / 'words.txt'
+	wordlist.write_text('www\n', encoding='utf-8')
+	writeConfig(configFile)
+	configFile.write_text(configFile.read_text().replace(
+		'sources = shodan-ctl,certspotter\n',
+		'sources = shodan-ctl,certspotter\nenable_dnsx = true\n'
+		f'dnsx_wordlist = {wordlist}\ndnsx_resolvers = 192.0.2.1, 192.0.2.2\n',
+	))
+
+	config = asmiraCommon.loadConfig(configFile)
+
+	assert config.enableDnsx is True
+	assert config.dnsxWordlist == wordlist
+	assert config.dnsxResolvers == ('192.0.2.1', '192.0.2.2')
+	assert config.dnsxRateLimit == 100
+	assert asmira.validateConfigScope(config) is True
+
+
+def testValidateConfigRequiresDnsxWordlist(tmp_path):
+	configFile = tmp_path / 'asmira.conf'
+	writeConfig(configFile)
+	configFile.write_text(configFile.read_text().replace(
+		'sources = shodan-ctl,certspotter\n',
+		'sources = shodan-ctl,certspotter\nenable_dnsx = true\n',
+	))
+
+	with pytest.raises(ValueError, match='dnsx_wordlist'):
+		asmira.validateConfigScope(asmiraCommon.loadConfig(configFile))
+
+
+def testValidateConfigRejectsMissingDnsxWordlist(tmp_path):
+	configFile = tmp_path / 'asmira.conf'
+	writeConfig(configFile)
+	configFile.write_text(configFile.read_text().replace(
+		'sources = shodan-ctl,certspotter\n',
+		'sources = shodan-ctl,certspotter\nenable_dnsx = true\n'
+		f'dnsx_wordlist = {tmp_path / "missing.txt"}\n',
+	))
+
+	with pytest.raises(ValueError, match='dnsx_wordlist.*illisible'):
+		asmira.validateConfigScope(asmiraCommon.loadConfig(configFile))
+
+
+def testValidateConfigRejectsUnreadableDnsxWordlist(tmp_path, monkeypatch):
+	configFile = tmp_path / 'asmira.conf'
+	wordlist = tmp_path / 'words.txt'
+	wordlist.write_text('www\n', encoding='utf-8')
+	writeConfig(configFile)
+	configFile.write_text(configFile.read_text().replace(
+		'sources = shodan-ctl,certspotter\n',
+		'sources = shodan-ctl,certspotter\nenable_dnsx = true\n'
+		f'dnsx_wordlist = {wordlist}\n',
+	))
+	monkeypatch.setattr(asmira.fqdnCollect.os, 'access', lambda path, mode: False)
+
+	with pytest.raises(ValueError, match='dnsx_wordlist.*illisible'):
+		asmira.validateConfigScope(asmiraCommon.loadConfig(configFile))
+
+
 def testRunIdAndAtomicNdjson(tmp_path):
 	runId = asmiraCommon.createRunId()
 	output = tmp_path / 'events.ndjson'
@@ -472,6 +533,24 @@ def testExposureEventsSummarisePortsAndFlagCleartextAndRdp():
 	assert exposure['port']['3389'] == {'state': ['open'], 'tls': ['tls']}
 	assert {'CLEARTEXT_SERVICE', 'RDP_EXPOSED'} <= set(exposure['tls']['findings'])
 	assert exposure['tls']['max_severity'] == 'high'
+
+
+def testOnlyPort80IsExemptFromCleartextAccounting():
+	event = asmira.buildExposureEvents([gradedItem(
+		port8080='open', tls_port8080='clear', port80='open', tls_port80='clear',
+	)], '20260731T200000Z-12345678')[0]
+	exposure = event['asmira']['exposure']
+
+	assert exposure['cleartext_ports'] == [8080]
+	assert {'80:clear', '8080:clear'} <= set(exposure['services'])
+	assert 'CLEARTEXT_SERVICE' in exposure['tls']['findings']
+
+
+def testUnconfirmedRdpPortIsNotFlagged():
+	event = asmira.buildExposureEvents([gradedItem(port3389='open', tls_port3389=None)], '20260731T200000Z-12345678')[0]
+
+	assert 3389 in event['asmira']['exposure']['open_ports']
+	assert 'RDP_EXPOSED' not in event['asmira']['exposure']['tls']['findings']
 
 
 def testExposureFindingsApplyWithoutHttps():

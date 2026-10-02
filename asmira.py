@@ -603,8 +603,10 @@ def buildFqdnObservation(items, runId):
 				port
 				for item in items
 				for port in webTLS.SCANNED_PORTS
-				# Le port 80 est en clair par nature : HSTS et la redirection le couvrent.
-				if port != 80 and item.get(f'port{port}') == 'open' and item.get(f'tls_port{port}') == 'clear'
+				# Seul le port 80 est du HTTP en clair par nature (HTTP_CLEARTEXT_PORTS).
+				if port not in webTLS.HTTP_CLEARTEXT_PORTS
+				and item.get(f'port{port}') == 'open'
+				and item.get(f'tls_port{port}') == 'clear'
 			}),
 			'services': sortedUnique(
 				f'{port}:{item.get(f"tls_port{port}") or "inconnu"}'
@@ -689,7 +691,9 @@ def buildFqdnObservation(items, runId):
 	exposureFindings = set()
 	if exposure['cleartext_ports']:
 		exposureFindings.add('CLEARTEXT_SERVICE')
-	if 3389 in exposure['open_ports']:
+	# RDP n’est signalé que si la sonde a obtenu une réponse RDP : derrière un CDN,
+	# le port 3389 peut accepter la connexion sans rien servir.
+	if any(item.get('port3389') == 'open' and item.get('tls_port3389') in ('tls', 'clear') for item in items):
 		exposureFindings.add('RDP_EXPOSED')
 	if exposureFindings:
 		addFindings(tls, exposureFindings)
@@ -941,18 +945,15 @@ def cleanExports(exportDir, retentionDays, currentTime=None):
 
 def validateConfigScope(config):
 	for configuredDomain in config.domains:
-		normalized = fqdnCollect.normalizeHost(configuredDomain)
-		registeredDomain = fqdnCollect.extractDomain(normalized)
-		if normalized != registeredDomain:
-			raise ValueError(
-				f'La cible {configuredDomain!r} n’est pas un domaine enregistré ; '
-				f'utiliser {registeredDomain!r} explicitement si tout ce périmètre est autorisé'
-			)
+		fqdnCollect.requireRegisteredDomain(configuredDomain)
 	fqdnCollect.parseSourceNames(','.join(config.sources))
 	if config.enableAmass and 'amass' in config.sources:
 		raise ValueError(
 			'Ne pas ajouter amass à [discovery] sources ; utiliser enable_amass = true'
 		)
+	if config.enableDnsx:
+		fqdnCollect.requireReadableFile(config.dnsxWordlist, '[discovery] dnsx_wordlist')
+	fqdnCollect.parseDnsxResolvers(config.dnsxResolvers)
 	return(True)
 
 
@@ -975,8 +976,15 @@ def run(config, runId=None, maxEndpoints=None, discoveryOnly=False):
 		if config.enableAmass:
 			sourceNames.append('amass')
 			print(
-				'[avertissement] Amass actif et brute-force sont autorisés par la configuration ; '
-				'Amass v5 peut démarrer son moteur local sur 127.0.0.1:4000.',
+				'[avertissement] Amass actif et brute-force sont autorisés par la configuration '
+				'(Amass 4.2.0 requis ; la v5 est refusée).',
+				file=sys.stderr,
+			)
+		if config.enableDnsx:
+			sourceNames.append('dnsx')
+			print(
+				'[avertissement] dnsx actif : brute-force DNS et tentative de transfert de zone '
+				'(AXFR) autorisés par la configuration.',
 				file=sys.stderr,
 			)
 		discoveryResult = fqdnCollect.hostCartography(
@@ -989,6 +997,10 @@ def run(config, runId=None, maxEndpoints=None, discoveryOnly=False):
 			maxPages=config.maxPages,
 			subfinderPath=config.subfinderPath or fqdnCollect.DEFAULT_SUBFINDER_PATH,
 			amassPath=config.amassPath or fqdnCollect.DEFAULT_AMASS_PATH,
+			dnsxPath=config.dnsxPath or fqdnCollect.DEFAULT_DNSX_PATH,
+			dnsxWordlist=config.dnsxWordlist,
+			dnsxResolvers=fqdnCollect.parseDnsxResolvers(config.dnsxResolvers),
+			dnsxRateLimit=config.dnsxRateLimit,
 			shodanHistory=config.shodanHistory,
 			collectorWorkers=config.collectorWorkers,
 			dnsWorkers=config.dnsWorkers,

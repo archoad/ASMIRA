@@ -14,7 +14,11 @@ run.
 - Une observation passive ou historique ne prouve pas qu’un hôte est exposé :
   seule la validation DNS détermine son état actuel.
 - La collecte passive et la reconnaissance active restent séparées.
-- Amass actif nécessite `--enable-amass` et une cible autorisée.
+- Amass actif nécessite `--enable-amass` et une cible autorisée fournie
+  explicitement ; la cible passive par défaut n’est jamais réutilisée.
+- Le brute-force DNS et la tentative de transfert de zone de dnsx nécessitent
+  `--enable-dnsx`, une liste de mots lisible et une cible autorisée fournie
+  explicitement.
 - La cartographie HTTP/TLS nécessite `--authorized-active-scan`.
 - Les secrets sont lus depuis l’environnement et ne doivent jamais être placés
   dans le dépôt, les arguments, les journaux ou les rapports.
@@ -77,8 +81,20 @@ python3 fqdnCollect.py
 python3 fqdnCollect.py --enable-amass example.com
 ```
 
-Amass v5 peut alors démarrer son moteur local en arrière-plan sur
-`127.0.0.1:4000`.
+Amass 4.2.0 est requis : la version 5, qui ne restitue pas ses découvertes
+(issue owasp-amass/amass#1074), est refusée avec un diagnostic explicite.
+
+Brute-force DNS et tentative de transfert de zone (AXFR) avec dnsx, uniquement
+sur un domaine autorisé :
+
+```sh
+python3 fqdnCollect.py --enable-dnsx --dnsx-wordlist subdomains.txt example.com
+```
+
+dnsx interroge les résolveurs du système (ou ceux de `--dnsx-resolvers`),
+jamais sa liste intégrée. Une réponse n’est écartée dans une zone wildcard que
+si sa signature DNS complète est identique à celle d’un libellé aléatoire.
+AXFR et brute-force partagent le délai maximal du collecteur.
 
 Cartographie active, uniquement sur des cibles autorisées :
 
@@ -121,7 +137,9 @@ Toute modification des seuils ou des plafonds impose d’incrémenter
 
 - **Ports et chiffrement** : 22, 25, 80, 443, 465, 587, 993, 995, 3389, 8080 et
   8443 sont sondés. Pour chaque port ouvert, Asmira vérifie la présence de TLS
-  direct, de STARTTLS (SMTP), de CredSSP/TLS (RDP) ou classe le port en SSH. Les
+  direct, de STARTTLS (SMTP), de CredSSP/TLS (RDP) ou classe le port en SSH ;
+  un port n’est classé en clair que sur preuve, et seul le port 80 (HTTP) ne
+  compte pas comme service non chiffré. Les
   constats `CLEARTEXT_SERVICE` et `RDP_EXPOSED` s’appliquent aussi aux FQDN sans
   HTTPS.
 - **CAA** : le CAA effectif de chaque FQDN est celui qu’une autorité appliquerait

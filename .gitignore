@@ -9,6 +9,7 @@ venv/
 
 # Documentation locale et procédures opérateur
 /AGENTS.md
+/CLAUDE.md
 /DEPLOYMENT.md
 
 site/

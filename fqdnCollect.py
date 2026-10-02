@@ -36,7 +36,8 @@ TXTDNS_DIR = DATA_DIR / 'txtdns'
 STATE_DIR = DATA_DIR / 'state'
 DEFAULT_HOSTS = ('example.com',)
 DEFAULT_SOURCES = ('shodan-ctl', 'subfinder', 'shodan-dns', 'certspotter')
-AVAILABLE_SOURCES = DEFAULT_SOURCES + ('amass',)
+AVAILABLE_SOURCES = DEFAULT_SOURCES + ('amass', 'dnsx')
+ACTIVE_SOURCES = ('amass', 'dnsx')
 DEFAULT_SOURCE_TIMEOUT = 600
 DEFAULT_DNS_TIMEOUT = 4
 DEFAULT_COLLECTOR_WORKERS = 4
@@ -47,6 +48,8 @@ DEFAULT_CERTSPOTTER_MAX_WAIT = 1800
 CERTSPOTTER_STATE_FILE = 'certspotter.json'
 DEFAULT_SUBFINDER_PATH = shutil.which('subfinder')
 DEFAULT_AMASS_PATH = shutil.which('amass')
+DEFAULT_DNSX_PATH = shutil.which('dnsx')
+DEFAULT_DNSX_RATE_LIMIT = 100
 HOST_LABEL_PATTERN = re.compile(r'^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$')
 DOMAIN_EXTRACTOR = tldextract.TLDExtract(suffix_list_urls=(), cache_dir=None)
 SHODAN_CTL_URL = 'https://ctl.shodan.io/api/v1/domain/{domain}/hostnames'
@@ -174,6 +177,20 @@ def extractDomain(host):
 	return(domain)
 
 
+def requireRegisteredDomain(host):
+	"""Refuse toute cible qui n’est pas exactement un domaine enregistré : une
+	énumération active porte sur toute la zone, l’autorisation doit donc viser
+	le domaine lui-même, jamais un sous-domaine ou une URL."""
+	normalized = normalizeHost(host)
+	registeredDomain = extractDomain(normalized)
+	if normalized != registeredDomain:
+		raise ValueError(
+			f'La cible {host!r} n’est pas un domaine enregistré ; '
+			f'utiliser {registeredDomain!r} explicitement si tout ce périmètre est autorisé'
+		)
+	return(registeredDomain)
+
+
 def extractHostFromRow(row):
 	if isinstance(row, str):
 		return(row)
@@ -210,7 +227,7 @@ def createFinding(name, domain, source, evidence=None):
 	))
 
 
-def createHttpSession(retryStatuses=(429, 500, 502, 503, 504)):
+def createHttpSession(retryStatuses=(429, 500, 502, 503, 504), respectRetryAfter=True):
 	debugDisplay()
 	retry = Retry(
 		total=3,
@@ -220,7 +237,9 @@ def createHttpSession(retryStatuses=(429, 500, 502, 503, 504)):
 		backoff_factor=1,
 		status_forcelist=retryStatuses,
 		allowed_methods=frozenset({'GET'}),
-		respect_retry_after_header=True,
+		# urllib3 rejoue tout 429 portant Retry-After, même hors status_forcelist :
+		# désactivé quand le collecteur gère lui-même ses quotas.
+		respect_retry_after_header=respectRetryAfter,
 	)
 	adapter = HTTPAdapter(max_retries=retry)
 	session = requests.Session()
@@ -542,7 +561,11 @@ class CertSpotterCollector(Collector):
 		self.apiKey = apiKey
 		# Les 429 sont gérés par le collecteur : les retries urllib3 ne font qu'attendre
 		# Retry-After avant d'échouer en perdant les pages déjà obtenues.
-		self.session = createHttpSession(retryStatuses=(500, 502, 503, 504)) if session is None else session
+		self.session = (
+			createHttpSession(retryStatuses=(500, 502, 503, 504), respectRetryAfter=False)
+			if session is None
+			else session
+		)
 		self.timeout = min(timeout, 60)
 		self.maxPages = maxPages
 		self.stateFile = Path(stateFile) if stateFile else None
@@ -688,6 +711,13 @@ class CertSpotterCollector(Collector):
 		return(self.findings(domain, entry))
 
 
+# Amass v5 n’enregistre pas ses découvertes de façon exploitable (issue
+# owasp-amass/amass#1074 : « subs » ne restitue aucun nom) ; la v4.2.0 écrit
+# directement ses résultats avec « enum -o ».
+AMASS_SUPPORTED_MAJOR = 4
+AMASS_FQDN_PATTERN = re.compile(r'([A-Za-z0-9*_.-]+) \(FQDN\)')
+
+
 class AmassCollector(Collector):
 	name = 'amass'
 
@@ -695,12 +725,33 @@ class AmassCollector(Collector):
 		self.path = Path(path) if path else None
 		self.timeout = timeout
 		self.workDir = Path(workDir)
+		self.version = None
 
 	def availability(self):
 		if self.path is None:
 			return(False, 'exécutable Amass absent')
 		if not self.path.is_file() or not os.access(self.path, os.X_OK):
 			return(False, f'exécutable Amass indisponible : {self.path}')
+		if self.version is None:
+			try:
+				completed = subprocess.run(
+					[str(self.path), '-version'],
+					stdout=subprocess.PIPE,
+					stderr=subprocess.STDOUT,
+					text=True,
+					timeout=30,
+					check=False,
+				)
+				match = re.search(r'v(\d+)\.\d+', completed.stdout or '')
+				self.version = match.group(0) if match else ''
+			except (OSError, subprocess.SubprocessError):
+				self.version = ''
+		major = re.match(r'v(\d+)', self.version or '')
+		if not major or int(major.group(1)) != AMASS_SUPPORTED_MAJOR:
+			return(False, (
+				f'Amass {self.version or "de version inconnue"} non pris en charge : '
+				f'installer Amass v{AMASS_SUPPORTED_MAJOR} (v4.2.0)'
+			))
 		return(True, None)
 
 	def collect(self, domain):
@@ -710,7 +761,7 @@ class AmassCollector(Collector):
 			prefix=f'.amass_{domain.replace(".", "_")}_',
 		) as temporaryName:
 			amassDir = Path(temporaryName)
-			outputFile = amassDir / 'names.txt'
+			outputFile = amassDir / 'relations.txt'
 			timeoutMinutes = max(1, math.ceil(self.timeout / 60))
 			enumCommand = [
 				str(self.path),
@@ -719,7 +770,9 @@ class AmassCollector(Collector):
 				'-brute',
 				'-d', domain,
 				'-dir', str(amassDir),
+				'-o', str(outputFile),
 				'-timeout', str(timeoutMinutes),
+				'-nocolor',
 				'-silent',
 			]
 			try:
@@ -728,48 +781,266 @@ class AmassCollector(Collector):
 					stdout=subprocess.DEVNULL,
 					stderr=subprocess.PIPE,
 					text=True,
-					timeout=self.timeout + 30,
+					timeout=self.timeout + 120,
 					check=False,
 				)
 			except subprocess.TimeoutExpired as error:
-				raise RuntimeError(f'Amass a dépassé le délai de {self.timeout + 30} s') from error
+				raise RuntimeError(f'Amass a dépassé le délai de {self.timeout + 120} s') from error
 			if completed.returncode != 0:
 				message = completed.stderr.strip() or 'aucun détail disponible'
 				raise RuntimeError(f'Amass a échoué avec le code {completed.returncode}: {message}')
+			return(self.parseRelations(outputFile, domain))
 
-			subsCommand = [
-				str(self.path),
-				'subs',
-				'-names',
-				'-d', domain,
-				'-dir', str(amassDir),
-				'-o', str(outputFile),
-				'-nocolor',
-			]
+	def parseRelations(self, outputFile, domain):
+		"""La v4 écrit des relations (« a.example.com (FQDN) --> a_record --> … ») :
+		seuls les FQDN du périmètre sont retenus, les serveurs DNS ou de messagerie
+		tiers sont ignorés sans avertissement."""
+		findings = []
+		if not outputFile.exists():
+			return(findings)
+		seen = set()
+		with outputFile.open('r', encoding='utf-8', errors='replace') as fileHandle:
+			for line in fileHandle:
+				for name in AMASS_FQDN_PATTERN.findall(line):
+					name = name.lower().rstrip('.')
+					if name in seen or not findingBelongsToDomain(name, domain):
+						continue
+					seen.add(name)
+					appendFinding(findings, name, domain, self.name)
+		return(findings)
+
+
+
+DNSX_RECORD_TYPES = ('a', 'aaaa', 'cname')
+DNSX_AXFR_TARGET_TYPES = ('CNAME', 'NS', 'MX', 'SRV', 'PTR')
+DNSX_WILDCARD_PROBES = 2
+
+
+def parseDnsxResolvers(value):
+	"""Adresses IP de résolveurs, au format attendu par dnsx (IPv6 entre crochets)."""
+	if isinstance(value, str):
+		value = value.replace(',', ' ').split()
+	resolvers = []
+	for item in value or []:
+		address = ipaddress.ip_address(str(item).strip())
+		resolver = f'[{address}]:53' if address.version == 6 else str(address)
+		if resolver not in resolvers:
+			resolvers.append(resolver)
+	return(resolvers)
+
+
+def requireReadableFile(filePath, optionName):
+	"""Valide un fichier obligatoire avant le lancement d’une source active."""
+	if filePath is None:
+		raise ValueError(f'{optionName} est obligatoire')
+	filePath = Path(filePath)
+	if not filePath.is_file() or not os.access(filePath, os.R_OK):
+		raise ValueError(f'{optionName} est illisible : {filePath}')
+	return(filePath)
+
+
+class DnsxCollector(Collector):
+	"""Brute-force d’une liste de mots et tentative de transfert de zone (AXFR).
+
+	Les résolveurs intégrés à dnsx ne sont jamais utilisés : ils comprennent
+	OpenDNS, qui renvoie en France des réponses falsifiées. À défaut de
+	résolveurs configurés, ceux du système sont transmis explicitement."""
+	name = 'dnsx'
+
+	def __init__(
+		self,
+		path=DEFAULT_DNSX_PATH,
+		wordlist=None,
+		resolvers=None,
+		rateLimit=DEFAULT_DNSX_RATE_LIMIT,
+		timeout=DEFAULT_SOURCE_TIMEOUT,
+		workDir=TXTDNS_DIR,
+		labelFactory=None,
+	):
+		self.path = Path(path) if path else None
+		self.wordlist = Path(wordlist) if wordlist else None
+		self.resolvers = parseDnsxResolvers(resolvers or [])
+		self.rateLimit = rateLimit
+		self.timeout = timeout
+		self.workDir = Path(workDir)
+		self.labelFactory = (lambda: f'asmira-{uuid.uuid4().hex}') if labelFactory is None else labelFactory
+
+	def availability(self):
+		if self.path is None:
+			return(False, 'exécutable dnsx absent')
+		if not self.path.is_file() or not os.access(self.path, os.X_OK):
+			return(False, f'exécutable dnsx indisponible : {self.path}')
+		if self.wordlist is None:
+			return(False, 'liste de mots dnsx non configurée')
+		if not self.wordlist.is_file() or not os.access(self.wordlist, os.R_OK):
+			return(False, f'liste de mots dnsx illisible : {self.wordlist}')
+		if not self.resolvers:
+			try:
+				self.resolvers = parseDnsxResolvers(dns.resolver.Resolver(configure=True).nameservers)
+			except (dns.exception.DNSException, OSError, ValueError):
+				self.resolvers = []
+		if not self.resolvers:
+			return(False, 'aucun résolveur DNS disponible pour dnsx')
+		return(True, None)
+
+	def baseCommand(self):
+		return([
+			str(self.path),
+			'-json',
+			'-omit-raw',
+			'-silent',
+			'-nc',
+			'-duc',
+			'-r', ','.join(self.resolvers),
+			'-rl', str(self.rateLimit),
+		])
+
+	def runDnsx(self, command, timeout):
+		if timeout <= 0:
+			return(False)
+		try:
 			completed = subprocess.run(
-				subsCommand,
+				command,
 				stdout=subprocess.DEVNULL,
 				stderr=subprocess.PIPE,
 				text=True,
-				timeout=min(self.timeout, 60),
+				timeout=timeout,
 				check=False,
 			)
-			if completed.returncode != 0:
-				message = completed.stderr.strip() or 'aucun détail disponible'
-				raise RuntimeError(
-					f'Extraction des résultats Amass échouée avec le code '
-					f'{completed.returncode}: {message}'
-				)
+		except subprocess.TimeoutExpired:
+			return(False)
+		if completed.returncode != 0:
+			message = completed.stderr.strip() or 'aucun détail disponible'
+			raise RuntimeError(f'dnsx a échoué avec le code {completed.returncode}: {message}')
+		return(True)
 
-			findings = []
-			if not outputFile.exists():
-				return(findings)
-			with outputFile.open('r', encoding='utf-8', errors='replace') as fileHandle:
-				for line in fileHandle:
-					if line.strip():
-						appendFinding(findings, line.strip(), domain, self.name)
-			return(findings)
+	def collect(self, domain):
+		deadline = time.monotonic() + self.timeout
+		self.workDir.mkdir(parents=True, exist_ok=True)
+		with tempfile.TemporaryDirectory(
+			dir=self.workDir,
+			prefix=f'.dnsx_{domain.replace(".", "_")}_',
+		) as temporaryName:
+			dnsxDir = Path(temporaryName)
+			domainFile = dnsxDir / 'domain.txt'
+			domainFile.write_text(f'{domain}\n', encoding='utf-8')
+			axfrFile = dnsxDir / 'axfr.jsonl'
+			axfrCompleted = self.runDnsx(
+				self.baseCommand() + ['-l', str(domainFile), '-axfr', '-o', str(axfrFile)],
+				min(max(0, deadline - time.monotonic()), 120),
+			)
+			findings = self.parseAxfr(axfrFile, domain)
 
+			# Des libellés aléatoires sont ajoutés à la liste : s’ils résolvent, la
+			# zone est wildcard et les réponses identiques sont écartées.
+			probes = {self.labelFactory().lower() for unused in range(DNSX_WILDCARD_PROBES)}
+			wordsFile = dnsxDir / 'words.txt'
+			with self.wordlist.open('r', encoding='utf-8', errors='replace') as source, \
+					wordsFile.open('w', encoding='utf-8') as target:
+				for line in source:
+					word = line.strip().lower().strip('.')
+					if word and not word.startswith('#'):
+						target.write(f'{word}\n')
+				for probe in sorted(probes):
+					target.write(f'{probe}\n')
+			bruteFile = dnsxDir / 'bruteforce.jsonl'
+			bruteCompleted = self.runDnsx(
+				self.baseCommand() + [
+					'-d', domain,
+					'-w', str(wordsFile),
+					'-a', '-aaaa', '-cname',
+					'-o', str(bruteFile),
+				],
+				max(0, deadline - time.monotonic()),
+			)
+			findings.extend(self.parseBruteforce(bruteFile, domain, probes))
+
+		if not (axfrCompleted and bruteCompleted):
+			raise IncompleteCollectionError(f'dnsx a dépassé le délai de {self.timeout} s', findings)
+		return(findings)
+
+	def readJsonLines(self, outputFile):
+		if not outputFile.exists():
+			return
+		with outputFile.open('r', encoding='utf-8', errors='replace') as fileHandle:
+			for lineNumber, line in enumerate(fileHandle, start=1):
+				if not line.strip():
+					continue
+				try:
+					record = json.loads(line)
+				except json.JSONDecodeError as error:
+					# Une ligne tronquée par l’arrêt sur délai est attendue.
+					print(f'[avertissement] dnsx: JSONL invalide ligne {lineNumber} ({error})', file=sys.stderr)
+					continue
+				if isinstance(record, dict):
+					yield record
+
+	def parseAxfr(self, outputFile, domain):
+		"""dnsx regroupe toute la zone sous l’apex : les noms ne figurent que dans
+		les enregistrements bruts du champ « all »."""
+		findings = []
+		seen = set()
+		for record in self.readJsonLines(outputFile):
+			for entry in (record.get('axfr') or {}).get('chain') or []:
+				for line in entry.get('all') or []:
+					fields = str(line).split()
+					if len(fields) < 5:
+						continue
+					names = [fields[0]]
+					if fields[3].upper() in DNSX_AXFR_TARGET_TYPES:
+						names.append(fields[-1])
+					for name in names:
+						name = name.lower().rstrip('.')
+						if name in seen or '_' in name or not findingBelongsToDomain(name, domain):
+							continue
+						seen.add(name)
+						appendFinding(findings, name, domain, self.name, evidence={'method': 'axfr'})
+		if findings:
+			print(
+				f'[avertissement] dnsx: transfert de zone (AXFR) accepté pour {domain}',
+				file=sys.stderr,
+			)
+		return(findings)
+
+	def parseBruteforce(self, outputFile, domain, probes):
+		resolved = {}
+		wildcardResolved = {}
+		for record in self.readJsonLines(outputFile):
+			if record.get('status_code') != 'NOERROR':
+				continue
+			signature = {
+				(recordType.upper(), str(value).rstrip('.').lower())
+				for recordType in DNSX_RECORD_TYPES
+				for value in record.get(recordType) or []
+			}
+			host = str(record.get('host') or '').lower().rstrip('.')
+			if not signature or not host:
+				continue
+			if host.split('.', 1)[0] in probes:
+				wildcardResolved.setdefault(host, set()).update(signature)
+				continue
+			resolved.setdefault(host, set()).update(signature)
+
+		wildcardSignatures = {
+			frozenset(signature) for signature in wildcardResolved.values() if signature
+		}
+		findings = []
+		discarded = 0
+		for host in sorted(resolved):
+			# Un nom réel peut partager une adresse avec la réponse wildcard tout en
+			# possédant d’autres enregistrements. Seule une signature DNS complète
+			# identique à celle d’une sonde aléatoire est écartée ici.
+			if frozenset(resolved[host]) in wildcardSignatures:
+				discarded += 1
+				continue
+			appendFinding(findings, host, domain, self.name, evidence={'method': 'bruteforce'})
+		if wildcardSignatures:
+			print(
+				f'[avertissement] dnsx: zone wildcard détectée sur {domain}, '
+				f'{discarded} résultat(s) de brute-force écarté(s)',
+				file=sys.stderr,
+			)
+		return(findings)
 
 def runCollector(collector, domain):
 	debugDisplay()
@@ -1175,6 +1446,10 @@ def buildCollectors(
 	maxPages=DEFAULT_MAX_PAGES,
 	subfinderPath=DEFAULT_SUBFINDER_PATH,
 	amassPath=DEFAULT_AMASS_PATH,
+	dnsxPath=DEFAULT_DNSX_PATH,
+	dnsxWordlist=None,
+	dnsxResolvers=None,
+	dnsxRateLimit=DEFAULT_DNSX_RATE_LIMIT,
 	shodanHistory=False,
 	workDir=TXTDNS_DIR,
 	stateDir=STATE_DIR,
@@ -1210,6 +1485,15 @@ def buildCollectors(
 				timeout=sourceTimeout,
 				workDir=workDir,
 			))
+		elif sourceName == 'dnsx':
+			collectors.append(DnsxCollector(
+				path=dnsxPath,
+				wordlist=dnsxWordlist,
+				resolvers=dnsxResolvers,
+				rateLimit=dnsxRateLimit,
+				timeout=sourceTimeout,
+				workDir=workDir,
+			))
 		else:
 			raise ValueError(f'Source inconnue : {sourceName}')
 	return(collectors)
@@ -1223,8 +1507,8 @@ def parseSourceNames(value):
 			continue
 		if sourceName not in AVAILABLE_SOURCES:
 			raise ValueError(f'Source inconnue : {sourceName}')
-		if sourceName == 'amass':
-			raise ValueError('Amass doit être activé avec --enable-amass')
+		if sourceName in ACTIVE_SOURCES:
+			raise ValueError(f'{sourceName} doit être activé avec --enable-{sourceName}')
 		if sourceName not in sourceNames:
 			sourceNames.append(sourceName)
 	return(sourceNames)
@@ -1242,6 +1526,10 @@ def hostCartography(
 	maxPages=DEFAULT_MAX_PAGES,
 	subfinderPath=DEFAULT_SUBFINDER_PATH,
 	amassPath=DEFAULT_AMASS_PATH,
+	dnsxPath=DEFAULT_DNSX_PATH,
+	dnsxWordlist=None,
+	dnsxResolvers=None,
+	dnsxRateLimit=DEFAULT_DNSX_RATE_LIMIT,
 	shodanHistory=False,
 	collectorWorkers=DEFAULT_COLLECTOR_WORKERS,
 	dnsWorkers=DEFAULT_DNS_WORKERS,
@@ -1275,6 +1563,10 @@ def hostCartography(
 			maxPages=maxPages,
 			subfinderPath=subfinderPath,
 			amassPath=amassPath,
+			dnsxPath=dnsxPath,
+			dnsxWordlist=dnsxWordlist,
+			dnsxResolvers=dnsxResolvers,
+			dnsxRateLimit=dnsxRateLimit,
 			shodanHistory=shodanHistory,
 			workDir=txtdnsDir,
 			stateDir=stateDir,
@@ -1353,7 +1645,7 @@ def parseArgs(arguments=None):
 	parser.add_argument(
 		'hosts',
 		nargs='*',
-		default=list(DEFAULT_HOSTS),
+		default=None,
 		help='Noms d’hôtes ou URL autorisés à traiter',
 	)
 	parser.add_argument(
@@ -1366,8 +1658,32 @@ def parseArgs(arguments=None):
 		action='store_true',
 		help=(
 			'Active Amass et le brute-force sur des cibles explicitement autorisées ; '
-			'Amass v5 peut démarrer son moteur local en arrière-plan'
+			'Amass 4.2.0 requis, la v5 est refusée'
 		),
+	)
+	parser.add_argument(
+		'--enable-dnsx',
+		action='store_true',
+		help=(
+			'Active le brute-force DNS et la tentative de transfert de zone (AXFR) '
+			'de dnsx sur des cibles explicitement autorisées'
+		),
+	)
+	parser.add_argument(
+		'--dnsx-wordlist',
+		type=Path,
+		help='Liste de mots (un libellé par ligne) pour le brute-force dnsx',
+	)
+	parser.add_argument(
+		'--dnsx-resolvers',
+		default='',
+		help='Adresses IP des résolveurs de dnsx, séparées par des virgules (défaut : ceux du système)',
+	)
+	parser.add_argument(
+		'--dnsx-rate-limit',
+		type=int,
+		default=DEFAULT_DNSX_RATE_LIMIT,
+		help=f'Requêtes DNS par seconde de dnsx (défaut : {DEFAULT_DNSX_RATE_LIMIT})',
 	)
 	parser.add_argument(
 		'--subfinder-path',
@@ -1380,6 +1696,12 @@ def parseArgs(arguments=None):
 		type=Path,
 		default=DEFAULT_AMASS_PATH,
 		help='Chemin de l’exécutable Amass',
+	)
+	parser.add_argument(
+		'--dnsx-path',
+		type=Path,
+		default=DEFAULT_DNSX_PATH,
+		help='Chemin de l’exécutable dnsx',
 	)
 	parser.add_argument(
 		'--source-timeout',
@@ -1454,6 +1776,7 @@ def main(arguments=None):
 		'--dns-workers': args.dns_workers,
 		'--wildcard-samples': args.wildcard_samples,
 		'--max-pages': args.max_pages,
+		'--dnsx-rate-limit': args.dnsx_rate_limit,
 	}
 	for option, value in numericValues.items():
 		if value <= 0:
@@ -1463,18 +1786,36 @@ def main(arguments=None):
 	try:
 		runId = createRunId() if args.run_id is None else validateRunId(args.run_id)
 		sourceNames = parseSourceNames(args.sources)
+		if args.enable_amass or args.enable_dnsx:
+			if not args.hosts:
+				raise ValueError(
+					'Une cible explicite est obligatoire avec --enable-amass ou --enable-dnsx'
+				)
+			# extractListDomains() élargit chaque entrée à son domaine enregistré :
+			# une source active n’accepte donc que des domaines enregistrés exacts.
+			for host in args.hosts:
+				requireRegisteredDomain(host)
+		hosts = list(DEFAULT_HOSTS if not args.hosts else args.hosts)
 		if args.enable_amass:
 			sourceNames.append('amass')
 			print(
-				'[avertissement] Amass actif et brute-force sont activés ; '
-				'Amass v5 peut démarrer son moteur local sur 127.0.0.1:4000.',
+				'[avertissement] Amass actif et brute-force sont activés '
+				'(Amass 4.2.0 requis ; la v5 est refusée).',
 				file=sys.stderr,
 			)
-		print(f'Cibles : {", ".join(args.hosts)}')
+		dnsxResolvers = parseDnsxResolvers(args.dnsx_resolvers)
+		if args.enable_dnsx:
+			requireReadableFile(args.dnsx_wordlist, '--dnsx-wordlist')
+			sourceNames.append('dnsx')
+			print(
+				'[avertissement] dnsx actif : brute-force DNS et tentative de transfert de zone (AXFR).',
+				file=sys.stderr,
+			)
+		print(f'Cibles : {", ".join(hosts)}')
 		print(f'Sources : {", ".join(sourceNames)}')
 		print(f'Run ID : {runId}')
 		hostCartography(
-			args.hosts,
+			hosts,
 			dataDir=args.output_dir,
 			txtdnsDir=args.output_dir / 'txtdns',
 			stateDir=args.state_dir,
@@ -1483,6 +1824,10 @@ def main(arguments=None):
 			maxPages=args.max_pages,
 			subfinderPath=args.subfinder_path,
 			amassPath=args.amass_path,
+			dnsxPath=args.dnsx_path,
+			dnsxWordlist=args.dnsx_wordlist,
+			dnsxResolvers=dnsxResolvers,
+			dnsxRateLimit=args.dnsx_rate_limit,
 			shodanHistory=args.shodan_history,
 			collectorWorkers=args.collector_workers,
 			dnsWorkers=args.dns_workers,

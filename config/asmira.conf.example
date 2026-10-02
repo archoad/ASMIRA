@@ -9,6 +9,14 @@ domains =
 [discovery]
 sources = shodan-ctl,subfinder,shodan-dns,certspotter
 enable_amass = false
+# Brute-force DNS et tentative de transfert de zone (AXFR) avec dnsx : actif,
+# réservé aux domaines autorisés. La liste de mots est obligatoire si activé
+# (ex. SecLists Discovery/DNS/subdomains-top1million-5000.txt).
+enable_dnsx = false
+dnsx_wordlist =
+# Adresses IP séparées par des virgules ; vide = résolveurs du système.
+dnsx_resolvers =
+dnsx_rate_limit = 100
 collector_workers = 4
 dns_workers = 20
 source_timeout = 600
@@ -44,6 +52,7 @@ retention_days = 14
 # Laisser vide pour utiliser la détection via PATH.
 subfinder =
 amass =
+dnsx =
 nmap =
 openssl =
 netcat =

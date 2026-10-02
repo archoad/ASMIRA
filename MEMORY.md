@@ -1,6 +1,6 @@
 # Mémoire du projet Asmira
 
-Dernière mise à jour : 2026-09-30
+Dernière mise à jour : 2026-10-02
 
 Ce document conserve uniquement l'état confirmé et les décisions durables du
 projet. Il ne doit contenir aucun secret, identifiant ni inventaire de cible.
@@ -38,7 +38,13 @@ Asmira couvre actuellement :
 ### Découverte
 
 `fqdnCollect.py` orchestre les collecteurs passifs Shodan CTL, Subfinder,
-Shodan DNS facultatif et Cert Spotter. Amass est un collecteur actif facultatif.
+Shodan DNS facultatif et Cert Spotter. Amass et dnsx sont des collecteurs
+actifs facultatifs, chacun activé par son propre drapeau (`enable_amass`,
+`enable_dnsx`). dnsx tente un transfert de zone (AXFR) puis un brute-force par
+liste de mots (`dnsx_wordlist`, obligatoire), avec les résolveurs configurés ou
+ceux du système, jamais sa liste intégrée ; les réponses identiques à celles de
+libellés aléatoires sont écartées dans une zone wildcard. Intégration testée le
+2 octobre 2026 en local, pas encore déployée sur `srv`.
 Chaque défaillance de source doit rester isolée et conserver un diagnostic avec
 sa provenance.
 
@@ -164,8 +170,13 @@ confirmé fonctionnel le 3 août 2026 avec 100 endpoints.
 - La présence d'un nom dans une source passive ou historique ne prouve pas son
   exposition actuelle ; la validation DNS détermine son état courant.
 - La collecte passive et la reconnaissance active restent séparées.
-- Amass actif et sa force brute nécessitent `--enable-amass` et une cible
-  explicitement autorisée.
+- Amass et dnsx nécessitent leur drapeau d’activation et une cible explicite
+  exactement égale au domaine enregistré autorisé. Le CLI ne réutilise jamais
+  sa cible passive d’exemple lorsqu’une source active est demandée.
+- dnsx exige une liste de mots existante et lisible avant le lancement. AXFR et
+  brute-force partagent un unique budget temporel par domaine ; une réponse
+  n’est écartée comme wildcard que si sa signature DNS complète est identique
+  à celle d’une sonde aléatoire.
 - Un pilote manuel exécuté avec `runuser -u asmira` doit être lancé depuis
   `/opt/asmira`. `runuser` conserve le répertoire courant et Amass échoue sur
   `stat .` si celui-ci se trouve sous `/root`. Le service systemd utilise déjà
@@ -263,8 +274,8 @@ Les phases 2 à 5 sont réalisées et validées sur les données du 29 septembre
 puis déployées sur `srv` (code et mapping) le 1er octobre 2026, avant le run de
 test du soir. `setup.py` pousse désormais tout le bloc `exposure` du mapping
 sur les index existants. Le
-dashboard refondu (49 panneaux) est publié dans Kibana sous l’identifiant
-`asmira-global-preview` en attendant de remplacer `asmira-global`. Le fichier
+dashboard refondu (51 panneaux) a remplacé `asmira-global` le 2 octobre
+2026. Le fichier
 `elastic/kibana/asmira-global-dashboard.json` en reste la source de vérité.
 
 Points techniques retenus :
@@ -425,3 +436,51 @@ Points techniques retenus :
   « Notation v2 ». Le projet reste distribué depuis son code source ; les
   archives `tar.gz` et `zip` du tag sont fournies par GitHub. Le site pointe
   vers cette version.
+- **2026-10-02 — Run de test du 1er octobre.** Premier run complet
+  (`partial = false`) : toutes les sources en succès, Shodan DNS de nouveau
+  productif, chargement complet de Cert Spotter en un seul run, 10 disparitions
+  déclarées, fichiers en 0640, note v2 et indicateurs PQC hybrides produits
+  (426 FQDN avec échange de clés hybride). Durée 5 h 51 : urllib3 rejouait en
+  silence les 429 de Cert Spotter (`Retry-After`), contournant le budget de
+  30 minutes ; corrigé (`respectRetryAfter=False`). La sonde de chiffrement
+  classait en clair des ports de CDN muets ou réinitialisés et des alertes TLS ;
+  elle exige désormais une preuve (session ou alerte TLS, réponse dans un autre
+  protocole, bannière SMTP `220`), et `RDP_EXPOSED` exige une réponse RDP.
+  Ce premier run v2 produit un artefact de transition : les constats
+  `HSTS_MISSING` « corrigés » et `NO_PQC_KEX` « apparus » reflètent l’arrivée
+  des nouvelles sondes, pas des corrections réelles. Amass ne produit toujours
+  aucun nom.
+- **2026-10-02 — Corrections déployées et dashboard publié.** Les corrections
+  de la sonde de chiffrement (preuve exigée, RDP confirmé) et de Cert Spotter
+  (429 gérés par le collecteur) sont déployées sur `srv`. Le port 8080 est
+  traité comme le port 80 (décision annulée par l’audit ci-dessous) : HTTP en clair par nature, affiché mais exclu de
+  `cleartext_ports` et de `CLEARTEXT_SERVICE` (`HTTP_CLEARTEXT_PORTS`). Le
+  timer est revenu au lundi seul. `asmira-global` est remplacé par le
+  dashboard de 51 panneaux et la prévisualisation est supprimée. Amass reste à
+  investiguer.
+- **2026-10-02 — Amass ramené en v4.2.0.** Amass v5.1.1 ne produisait aucun
+  nom : son moteur journalise ses découvertes mais ne les enregistre pas dans
+  sa base, et `amass subs` ne restitue rien (problème connu, issue
+  owasp-amass/amass#1074 ; seul le retour à la v4.2.0 est confirmé). Le
+  collecteur exige désormais Amass v4 (contrôle de version, binaire v5 refusé
+  avec diagnostic), utilise `enum -o` et extrait des relations écrites par la
+  v4 les seuls FQDN du périmètre. Validé sur archoad.io depuis `srv`. Le
+  moteur v5 écoutait en outre sur toutes les interfaces (`*:4000`) pendant les
+  runs.
+- **2026-10-02 — Audit de code.** Le CLI refuse désormais toute cible qui
+  n’est pas exactement un domaine enregistré dès qu’une source active est
+  demandée (`requireRegisteredDomain`, partagée avec l’orchestrateur) ; la
+  sonde SMTP borne la longueur de ligne (1 024 octets), la taille de réponse
+  (16 Kio) et impose une échéance globale ; les messages annoncent Amass 4.2.0.
+  Le port 8080 n’est plus exempté : seul le port 80 est du HTTP en clair par
+  nature, car HSTS conserve le port 8080 (RFC 6797, section 8.3) et la sonde
+  n’y classe « clear » qu’une réponse en clair prouvée.
+- **2026-10-02 — Durcissement des sources actives et de SMTP.** Le CLI exige
+  désormais une cible fournie explicitement pour Amass ou dnsx et valide la
+  lisibilité de la wordlist dnsx avant toute collecte ; l’orchestrateur applique
+  la même validation. AXFR et brute-force dnsx consomment un budget cumulé, et
+  le filtrage wildcard compare les signatures DNS complètes afin de conserver
+  un hôte réel qui possède des réponses supplémentaires. La détection SMTP ne
+  reconnaît plus `STARTTLS` comme simple sous-chaîne, mais comme mot-clé EHLO
+  exact. Le préflight local documente aussi dnsx et sa wordlist. Corrections
+  validées localement, non déployées sur `srv` à cette date.

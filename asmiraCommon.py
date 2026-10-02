@@ -159,6 +159,10 @@ class AsmiraConfig:
 	domains: tuple
 	sources: tuple
 	enableAmass: bool
+	enableDnsx: bool
+	dnsxWordlist: Path | None
+	dnsxResolvers: tuple
+	dnsxRateLimit: int
 	collectorWorkers: int
 	dnsWorkers: int
 	sourceTimeout: int
@@ -182,6 +186,7 @@ class AsmiraConfig:
 	retentionDays: int
 	subfinderPath: Path | None
 	amassPath: Path | None
+	dnsxPath: Path | None
 	nmapPath: Path | None
 	opensslPath: Path | None
 	netcatPath: Path | None
@@ -224,6 +229,10 @@ def loadConfig(filePath=DEFAULT_CONFIG_PATH):
 		domains=domains,
 		sources=sources,
 		enableAmass=parser.getboolean('discovery', 'enable_amass', fallback=False),
+		enableDnsx=parser.getboolean('discovery', 'enable_dnsx', fallback=False),
+		dnsxWordlist=optionalPath(parser, 'discovery', 'dnsx_wordlist'),
+		dnsxResolvers=tuple(splitConfigList(parser.get('discovery', 'dnsx_resolvers', fallback=''))),
+		dnsxRateLimit=getPositiveInt(parser, 'discovery', 'dnsx_rate_limit', 100),
 		collectorWorkers=getPositiveInt(parser, 'discovery', 'collector_workers', 4),
 		dnsWorkers=getPositiveInt(parser, 'discovery', 'dns_workers', 20),
 		sourceTimeout=getPositiveInt(parser, 'discovery', 'source_timeout', 600),
@@ -247,6 +256,7 @@ def loadConfig(filePath=DEFAULT_CONFIG_PATH):
 		retentionDays=getPositiveInt(parser, 'storage', 'retention_days', 14),
 		subfinderPath=optionalPath(parser, 'tools', 'subfinder'),
 		amassPath=optionalPath(parser, 'tools', 'amass'),
+		dnsxPath=optionalPath(parser, 'tools', 'dnsx'),
 		nmapPath=optionalPath(parser, 'tools', 'nmap'),
 		opensslPath=optionalPath(parser, 'tools', 'openssl'),
 		netcatPath=optionalPath(parser, 'tools', 'netcat'),

@@ -76,6 +76,11 @@ SCANNED_PORTS = (22, 25, 80, 443, 465, 587, 993, 995, 3389, 8080, 8443)
 IMPLICIT_TLS_PORTS = (443, 465, 993, 995, 8080, 8443)
 # Ports où TLS s’obtient par STARTTLS, avec le protocole attendu par OpenSSL.
 STARTTLS_PORTS = {25: 'smtp', 587: 'smtp'}
+# Port HTTP en clair par nature : HSTS et la redirection vers HTTPS le couvrent ;
+# il est affiché mais ne compte pas comme service non chiffré. Le 8080 n’en fait
+# pas partie : HSTS conserve le port lors de la bascule vers HTTPS (RFC 6797,
+# section 8.3), et la sonde n’y classe « clear » qu’une réponse en clair prouvée.
+HTTP_CLEARTEXT_PORTS = (80,)
 PORT_PROBE_TIMEOUT = 5
 # Groupes d’échange de clés post-quantiques connus d’OpenSSL 3.5. Les groupes
 # hybrides associent ML-KEM (FIPS 203) à un algorithme classique, comme l’exige
@@ -1374,20 +1379,102 @@ def targetKey(item):
 
 
 def classifyTlsProbe(output):
+	"""Classe une sonde TLS sur des preuves : tls si la session aboutit ou si le
+	serveur répond par une alerte TLS (il parle TLS mais refuse ce nom ou cette
+	offre) ; clear si le serveur a répondu dans un autre protocole ; None sinon.
+	Un silence ou une réinitialisation ne prouvent rien : derrière un CDN, de
+	nombreux ports acceptent la connexion TCP sans rien servir."""
 	if re.search(r'New,\s*(?:TLSv[\d.]+|SSLv3)', output):
 		return('tls')
-	if re.search(r'Connection refused|connect:errno|Connection timed out|Name or service not known', output):
+	if re.search(r'alert number|ssl/tls alert|tlsv1 alert|sslv3 alert', output, re.IGNORECASE):
+		return('tls')
+	if re.search(r'wrong version number|packet length too long|http request', output, re.IGNORECASE):
+		return('clear')
+	return(None)
+
+
+# Bornes de la sonde SMTP : un serveur hostile ne doit pouvoir ni faire croître
+# la mémoire ni immobiliser un worker et un slot du sémaphore.
+SMTP_MAX_LINE = 1024
+SMTP_MAX_REPLY = 16384
+
+
+def readSmtpReply(connection, reader, deadline, maxLines=50):
+	"""Lit une réponse SMTP (éventuellement multiligne) avant l’échéance absolue
+	deadline (time.monotonic). Lève TimeoutError ou ValueError si le serveur
+	dépasse l’échéance, la longueur de ligne ou la taille de réponse admises."""
+	lines = []
+	total = 0
+	for unused in range(maxLines):
+		remaining = deadline - time.monotonic()
+		if remaining <= 0:
+			raise TimeoutError('échéance de la sonde SMTP dépassée')
+		connection.settimeout(remaining)
+		line = reader.readline(SMTP_MAX_LINE + 1)
+		if not line:
+			break
+		if len(line) > SMTP_MAX_LINE:
+			raise ValueError('ligne SMTP trop longue')
+		total += len(line)
+		if total > SMTP_MAX_REPLY:
+			raise ValueError('réponse SMTP trop volumineuse')
+		lines.append(line)
+		if len(line) < 4 or line[3:4] != b'-':
+			break
+	else:
+		raise ValueError('réponse SMTP avec trop de lignes')
+	return(lines)
+
+
+def smtpReplyHasExtension(reply, extension):
+	"""Détecte un mot-clé EHLO exact, sans accepter une simple sous-chaîne."""
+	extension = extension.upper()
+	for line in reply:
+		if len(line) < 4 or line[:3] != b'250':
+			continue
+		payload = line[4:].strip()
+		keyword = payload.split(None, 1)[0].upper() if payload else b''
+		if keyword == extension:
+			return(True)
+	return(False)
+
+
+def smtpOffersStartTls(hostip, port, timeout=None):
+	"""True si le serveur SMTP annonce STARTTLS après EHLO, False s’il répond sans
+	l’annoncer, None s’il n’a pas présenté de bannière 220 ou a dépassé les bornes
+	de la sonde. timeout est un budget global pour tout l’échange."""
+	timeout = PORT_PROBE_TIMEOUT if timeout is None else timeout
+	deadline = time.monotonic() + timeout
+	try:
+		with socket.create_connection((hostip, port), timeout=timeout) as connection:
+			reader = connection.makefile('rb')
+			banner = readSmtpReply(connection, reader, deadline)
+			if not banner or not banner[0].startswith(b'220'):
+				return(None)
+			connection.sendall(b'EHLO asmira.invalid\r\n')
+			reply = readSmtpReply(connection, reader, deadline)
+			with contextlib.suppress(OSError):
+				connection.sendall(b'QUIT\r\n')
+			if not reply or not reply[0].startswith(b'250'):
+				return(None)
+			return(smtpReplyHasExtension(reply, b'STARTTLS'))
+	except (OSError, ValueError):
 		return(None)
-	return('clear')
 
 
 def testPortEncryption(hostip, host, port, commandSemaphore=None):
 	"""Indique si le service d’un port ouvert est chiffré : tls (TLS direct),
-	starttls, ssh, clear (aucun chiffrement trouvé) ou None (sonde sans réponse)."""
+	starttls, ssh, clear (le service répond sans chiffrement) ou None (aucune
+	réponse probante, par exemple un port de CDN qui accepte la connexion)."""
 	if port == 22:
 		return('ssh')
 	if port == 80:
 		return('clear')
+	if port in STARTTLS_PORTS:
+		with commandSlot(commandSemaphore):
+			offered = smtpOffersStartTls(hostip, port)
+		if offered is not True:
+			return(None if offered is None else 'clear')
 	if port == 3389:
 		cmd = [
 			dicTools['nmap'], '-n', '-Pn', *getNmapIpVersionArgs(hostip),
@@ -1411,20 +1498,13 @@ def testPortEncryption(hostip, host, port, commandSemaphore=None):
 				timeout=70 if port == 3389 else PORT_PROBE_TIMEOUT,
 				check=False,
 			)
-	except subprocess.TimeoutExpired as error:
-		# Un serveur TLS répond immédiatement au ClientHello. Une connexion TCP établie
-		# (« CONNECTED(») restée muette est donc un service en clair qui attend sa
-		# requête ; sans connexion, on ne peut pas conclure.
-		partial = (error.stdout or b'').decode(errors='replace')
-		if port in IMPLICIT_TLS_PORTS and 'CONNECTED(' in partial:
-			return('clear')
-		return(None)
-	except OSError:
+	except (OSError, subprocess.TimeoutExpired):
 		return(None)
 	output = completed.stdout.decode(errors='replace')
 	if port == 3389:
 		# CredSSP (NLA) et la couche « SSL » reposent sur TLS ; « Native RDP » seul
-		# signifie le chiffrement RDP historique (RC4).
+		# signifie le chiffrement RDP historique (RC4). Sans réponse RDP, le port
+		# n’est pas un service RDP identifié.
 		if re.search(r'(?:CredSSP[^:]*|SSL):\s*SUCCESS', output):
 			return('tls')
 		if re.search(r'Native RDP:\s*SUCCESS', output):
