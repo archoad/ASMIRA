@@ -9,11 +9,13 @@ from datetime import datetime
 from pathlib import Path
 
 import asmiraGrade
+import asmiraReport
 import fqdnCollect
 import webTLS
 from asmiraCommon import (
 	DEFAULT_CONFIG_PATH,
 	atomicWriteNdjson,
+	atomicWriteText,
 	createRunId,
 	loadConfig,
 	stableId,
@@ -603,7 +605,8 @@ def buildFqdnObservation(items, runId):
 				port
 				for item in items
 				for port in webTLS.SCANNED_PORTS
-				# Seul le port 80 est du HTTP en clair par nature (HTTP_CLEARTEXT_PORTS).
+				# Seul le port 80 est du HTTP en clair par nature (HTTP_CLEARTEXT_PORTS) ;
+				# un 8080 qui redirige vers HTTPS est classé « redirect », pas « clear ».
 				if port not in webTLS.HTTP_CLEARTEXT_PORTS
 				and item.get(f'port{port}') == 'open'
 				and item.get(f'tls_port{port}') == 'clear'
@@ -957,6 +960,33 @@ def validateConfigScope(config):
 	return(True)
 
 
+def writeRunReport(config, reportFile, runEvent, discoveryResult, exposureEvents, previousEvents):
+	"""Écrit le bilan HTML du run et l’envoie avec un résumé si [report] email = true.
+	Un échec est signalé mais n’affecte ni le statut du run ni ses exports."""
+	try:
+		analysis = asmiraReport.analyseRun(
+			runEvent,
+			discoveryResult=discoveryResult,
+			exposureEvents=exposureEvents,
+			previousEvents=previousEvents,
+		)
+		reportHtml = asmiraReport.renderHtml(analysis, maxItems=config.reportMaxItems)
+		atomicWriteText(reportFile, reportHtml)
+		print(f'Bilan du run : {reportFile}')
+	except Exception as error:
+		print(f'[avertissement] bilan du run non produit : {type(error).__name__}: {error}', file=sys.stderr)
+		return(False)
+	if not config.reportEmailEnabled:
+		return(True)
+	try:
+		asmiraReport.sendRunReport(asmiraReport.renderSummary(analysis), reportHtml, analysis, config)
+		print(f'Bilan envoyé à {", ".join(config.reportEmailTo)}')
+	except Exception as error:
+		print(f'[avertissement] bilan non envoyé par e-mail : {type(error).__name__}: {error}', file=sys.stderr)
+		return(False)
+	return(True)
+
+
 def run(config, runId=None, maxEndpoints=None, discoveryOnly=False):
 	validateConfigScope(config)
 	runId = createRunId() if runId is None else validateRunId(runId)
@@ -969,6 +999,8 @@ def run(config, runId=None, maxEndpoints=None, discoveryOnly=False):
 	config.stateDir.mkdir(parents=True, exist_ok=True)
 	discoveryResult = None
 	exposureResult = None
+	exposureEvents = None
+	previousExposureEvents = None
 	status = 'failed'
 	errorMessage = None
 	try:
@@ -994,6 +1026,7 @@ def run(config, runId=None, maxEndpoints=None, discoveryOnly=False):
 			stateDir=config.stateDir,
 			sourceNames=sourceNames,
 			sourceTimeout=config.sourceTimeout,
+			amassTimeout=config.amassTimeout,
 			maxPages=config.maxPages,
 			subfinderPath=config.subfinderPath or fqdnCollect.DEFAULT_SUBFINDER_PATH,
 			amassPath=config.amassPath or fqdnCollect.DEFAULT_AMASS_PATH,
@@ -1093,6 +1126,14 @@ def run(config, runId=None, maxEndpoints=None, discoveryOnly=False):
 			[runEvent],
 		)
 		cleanExports(config.exportDir, config.retentionDays)
+		writeRunReport(
+			config,
+			runDir / f'{runId}_report.html',
+			runEvent,
+			discoveryResult,
+			exposureEvents,
+			previousExposureEvents,
+		)
 	return({
 		'run_id': runId,
 		'run_dir': str(runDir),
@@ -1133,6 +1174,7 @@ def main(argv=None):
 				'domains': len(config.domains),
 				'active_scan': config.activeEnabled,
 				'active_authorized': config.activeAuthorized,
+				'report_email': list(config.reportEmailTo) if config.reportEmailEnabled else False,
 			}, ensure_ascii=False))
 			return(0)
 		result = run(

@@ -81,6 +81,12 @@ STARTTLS_PORTS = {25: 'smtp', 587: 'smtp'}
 # pas partie : HSTS conserve le port lors de la bascule vers HTTPS (RFC 6797,
 # section 8.3), et la sonde n’y classe « clear » qu’une réponse en clair prouvée.
 HTTP_CLEARTEXT_PORTS = (80,)
+# Ports HTTP alternatifs où une réponse en clair qui redirige vers une URL https://
+# est classée « redirect » : le service n’est servi qu’en TLS, la redirection en
+# est la preuve. Une redirection relative ou vers http:// reste « clear ».
+HTTP_REDIRECT_PORTS = (8080,)
+HTTP_REDIRECT_STATUSES = (301, 302, 303, 307, 308)
+HTTP_MAX_HEADER = 16384
 PORT_PROBE_TIMEOUT = 5
 # Groupes d’échange de clés post-quantiques connus d’OpenSSL 3.5. Les groupes
 # hybrides associent ML-KEM (FIPS 203) à un algorithme classique, comme l’exige
@@ -1333,7 +1339,6 @@ def buildListIps(
 				host for host in hostsByIp[item['ip']]
 				if host != item['host']
 			)
-	print(pd.DataFrame(output))
 	destinationFile = (
 		DATA_DIR / f'{now}_list_ip.json'
 		if destinationFile is None
@@ -1462,10 +1467,56 @@ def smtpOffersStartTls(hostip, port, timeout=None):
 		return(None)
 
 
+def parseHttpRedirect(response):
+	"""True si l’en-tête de réponse HTTP est une redirection vers une URL
+	https://, False pour toute autre réponse HTTP, None si ce n’est pas du HTTP."""
+	head = response.split(b'\r\n\r\n', 1)[0].decode('iso-8859-1')
+	lines = head.split('\r\n')
+	status = re.match(r'^HTTP/\d(?:\.\d)? (\d{3})', lines[0])
+	if not status:
+		return(None)
+	if int(status.group(1)) not in HTTP_REDIRECT_STATUSES:
+		return(False)
+	for line in lines[1:]:
+		name, separator, value = line.partition(':')
+		if separator and name.strip().lower() == 'location':
+			return(value.strip().lower().startswith('https://'))
+	return(False)
+
+
+def httpRedirectsToHttps(hostip, host, port, timeout=None):
+	"""Envoie une requête HTTP en clair et indique si le service redirige vers
+	HTTPS (voir parseHttpRedirect). Échange borné en durée et en taille."""
+	timeout = PORT_PROBE_TIMEOUT if timeout is None else timeout
+	deadline = time.monotonic() + timeout
+	request = (
+		f'GET / HTTP/1.1\r\nHost: {host}\r\nUser-Agent: asmira\r\n'
+		'Accept: */*\r\nConnection: close\r\n\r\n'
+	).encode('ascii', errors='ignore')
+	response = b''
+	try:
+		with socket.create_connection((hostip, port), timeout=timeout) as connection:
+			connection.sendall(request)
+			while b'\r\n\r\n' not in response and len(response) < HTTP_MAX_HEADER:
+				remaining = deadline - time.monotonic()
+				if remaining <= 0:
+					break
+				connection.settimeout(remaining)
+				chunk = connection.recv(4096)
+				if not chunk:
+					break
+				response += chunk
+	except OSError:
+		if not response:
+			return(None)
+	return(parseHttpRedirect(response[:HTTP_MAX_HEADER]) if response else None)
+
+
 def testPortEncryption(hostip, host, port, commandSemaphore=None):
 	"""Indique si le service d’un port ouvert est chiffré : tls (TLS direct),
-	starttls, ssh, clear (le service répond sans chiffrement) ou None (aucune
-	réponse probante, par exemple un port de CDN qui accepte la connexion)."""
+	starttls, ssh, redirect (HTTP en clair qui redirige vers HTTPS, ports de
+	HTTP_REDIRECT_PORTS), clear (le service répond sans chiffrement) ou None
+	(aucune réponse probante, par exemple un port de CDN qui accepte la connexion)."""
 	if port == 22:
 		return('ssh')
 	if port == 80:
@@ -1513,6 +1564,10 @@ def testPortEncryption(hostip, host, port, commandSemaphore=None):
 	result = classifyTlsProbe(output)
 	if result == 'tls' and port in STARTTLS_PORTS:
 		return('starttls')
+	if result == 'clear' and port in HTTP_REDIRECT_PORTS:
+		with commandSlot(commandSemaphore):
+			if httpRedirectsToHttps(hostip, host, port) is True:
+				return('redirect')
 	return(result)
 
 
@@ -1741,11 +1796,9 @@ def tlsAnalyse(
 		if targetKey(item) in completedByKey
 	]
 	atomicWriteJson(checkpointFile, output)
-	df = pd.DataFrame(output)
-	print(df)
 	atomicWriteJson(destinationFile, output)
 	if generateXlsx:
-		dfToExcel(df, destinationFile=excelFile)
+		dfToExcel(pd.DataFrame(output), destinationFile=excelFile)
 	gdh = time.strftime("%Hh %Mm %Ss", time.gmtime(time.monotonic() - startTime))
 	print('Execution time: %s seconds' % (gdh))
 	return(output)

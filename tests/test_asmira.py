@@ -123,6 +123,61 @@ def testValidateConfigRejectsUnreadableDnsxWordlist(tmp_path, monkeypatch):
 		asmira.validateConfigScope(asmiraCommon.loadConfig(configFile))
 
 
+def testLoadConfigParsesReportAndAmassTimeout(tmp_path):
+	configFile = tmp_path / 'asmira.conf'
+	writeConfig(configFile, '''
+[report]
+email = true
+email_to = soc@example.org, rssi@example.org
+email_from = asmira@example.org
+smtp_host = relay.example.org
+smtp_port = 587
+smtp_starttls = true
+smtp_username = asmira
+max_items = 20
+''')
+	configFile.write_text(configFile.read_text().replace(
+		'sources = shodan-ctl,certspotter\n',
+		'sources = shodan-ctl,certspotter\namass_timeout = 1200\n',
+	))
+
+	config = asmiraCommon.loadConfig(configFile)
+
+	assert config.amassTimeout == 1200
+	assert config.reportEmailEnabled is True
+	assert config.reportEmailTo == ('soc@example.org', 'rssi@example.org')
+	assert config.reportEmailFrom == 'asmira@example.org'
+	assert (config.reportSmtpHost, config.reportSmtpPort) == ('relay.example.org', 587)
+	assert config.reportSmtpStartTls is True
+	assert config.reportSmtpUsername == 'asmira'
+	assert config.reportMaxItems == 20
+
+
+def testReportDefaultsToLocalRelayWithoutEmail(tmp_path):
+	configFile = tmp_path / 'asmira.conf'
+	writeConfig(configFile)
+
+	config = asmiraCommon.loadConfig(configFile)
+
+	assert config.amassTimeout is None
+	assert config.reportEmailEnabled is False
+	assert (config.reportSmtpHost, config.reportSmtpPort) == ('localhost', 25)
+
+
+@pytest.mark.parametrize('section, message', [
+	('[report]\nemail = true\n', 'email_to est obligatoire'),
+	('[report]\nemail_to = soc@example.org\\nBcc: x@example.net\n', 'adresse e-mail invalide'),
+	('[report]\nemail_to = Soc <soc@example.org>\n', 'adresse e-mail invalide'),
+	('[report]\nemail_to = soc@example.org\nsmtp_host = relay example.org\n', 'smtp_host invalide'),
+])
+def testLoadConfigRejectsInvalidReportSettings(tmp_path, section, message):
+	configFile = tmp_path / 'asmira.conf'
+	writeConfig(configFile, '\n' + section)
+
+	with pytest.raises(ValueError, match=message):
+		asmiraCommon.loadConfig(configFile)
+
+
 def testRunIdAndAtomicNdjson(tmp_path):
 	runId = asmiraCommon.createRunId()
 	output = tmp_path / 'events.ndjson'
@@ -920,11 +975,14 @@ retention_days = 14
 	assert runEvent['asmira']['run']['status'] == 'success'
 	assert runEvent['asmira']['run']['counts']['endpoints'] == 1
 	assert runEvent['asmira']['run']['counts']['fqdns'] == 1
+	report = (tmp_path / 'runs' / '20260731T200000Z-12345678' / '20260731T200000Z-12345678_report.html')
+	assert '<code>20260731T200000Z-12345678</code>' in report.read_text(encoding='utf-8')
 
 
 @pytest.mark.parametrize('writer, payload', [
 	(asmiraCommon.atomicWriteJson, {'a': 1}),
 	(asmiraCommon.atomicWriteNdjson, [{'a': 1}]),
+	(asmiraCommon.atomicWriteText, '# rapport\n'),
 ])
 def testAtomicWritesHonourProcessUmask(tmp_path, monkeypatch, writer, payload):
 	monkeypatch.setattr(asmiraCommon, 'PROCESS_UMASK', 0o027)

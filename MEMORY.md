@@ -43,8 +43,8 @@ actifs facultatifs, chacun activé par son propre drapeau (`enable_amass`,
 `enable_dnsx`). dnsx tente un transfert de zone (AXFR) puis un brute-force par
 liste de mots (`dnsx_wordlist`, obligatoire), avec les résolveurs configurés ou
 ceux du système, jamais sa liste intégrée ; les réponses identiques à celles de
-libellés aléatoires sont écartées dans une zone wildcard. Intégration testée le
-2 octobre 2026 en local, pas encore déployée sur `srv`.
+libellés aléatoires sont écartées dans une zone wildcard. Déployés sur `srv` et
+exécutés pour la première fois en production le 2 octobre 2026.
 Chaque défaillance de source doit rester isolée et conserver un diagnostic avec
 sa provenance.
 
@@ -484,3 +484,22 @@ Points techniques retenus :
   reconnaît plus `STARTTLS` comme simple sous-chaîne, mais comme mot-clé EHLO
   exact. Le préflight local documente aussi dnsx et sa wordlist. Corrections
   validées localement, non déployées sur `srv` à cette date.
+- **2026-10-03 — Run complet du 2 octobre, rapport d’analyse.** Premier run
+  complet avec Amass v4.2.0 et dnsx (3 h 18, 2 255 FQDN, run partiel : trois
+  dépassements de délai Amass, trois arrêts de quota Cert Spotter en cours de
+  chargement initial). Les 64 nouveaux FQDN viennent tous des sources actives
+  (dnsx : 49 noms résolus uniques en ~50 s par domaine ; Amass : 4, en ~12 min).
+  Aucun transfert de zone accepté. Corrections décidées : à l’expiration de son
+  délai, Amass conserve les relations déjà écrites (`IncompleteCollectionError`)
+  et `amass_timeout` lui donne un délai propre ; un 8080 en clair qui redirige
+  vers une URL `https://` est classé `redirect` et n’est plus compté comme
+  service non chiffré (107 des 113 cas étaient le port 8080 HTTP de Cloudflare) ;
+  les avertissements « résultat ignoré » ne sont écrits qu’une fois par run ;
+  le tableau pandas n’est plus affiché dans le journal. Chaque run écrit
+  désormais un bilan (`asmiraReport.py`), envoyé par e-mail si
+  `[report] email = true` via le relais SMTP configuré (Exim local sur `srv`) ;
+  un échec du bilan n’affecte jamais le run. Le premier format, un rapport
+  Markdown dans le corps du message, a été jugé difficile à lire : depuis le
+  3 octobre, l’e-mail est un court résumé texte et le bilan détaillé un fichier
+  HTML autonome joint (`<run-id>_report.html` : CSS et graphiques SVG intégrés,
+  aucun script ni ressource externe, CSP `default-src 'none'`).

@@ -105,6 +105,31 @@ def atomicWriteNdjson(filePath, records):
 	return(count)
 
 
+def atomicWriteText(filePath, text):
+	filePath = Path(filePath)
+	filePath.parent.mkdir(parents=True, exist_ok=True)
+	fileDescriptor, temporaryName = tempfile.mkstemp(
+		dir=filePath.parent,
+		prefix=f'.{filePath.name}.',
+		suffix='.tmp',
+	)
+	try:
+		applyCreationMode(fileDescriptor)
+		with os.fdopen(fileDescriptor, 'w', encoding='utf-8') as fileHandle:
+			fileHandle.write(text)
+			fileHandle.flush()
+			os.fsync(fileHandle.fileno())
+		os.replace(temporaryName, filePath)
+	except Exception:
+		try:
+			os.close(fileDescriptor)
+		except OSError:
+			pass
+		Path(temporaryName).unlink(missing_ok=True)
+		raise
+	return(filePath)
+
+
 def readJson(filePath, default=None):
 	filePath = Path(filePath)
 	if not filePath.is_file():
@@ -166,6 +191,7 @@ class AsmiraConfig:
 	collectorWorkers: int
 	dnsWorkers: int
 	sourceTimeout: int
+	amassTimeout: int | None
 	dnsTimeout: float
 	wildcardSamples: int
 	maxPages: int
@@ -190,6 +216,26 @@ class AsmiraConfig:
 	nmapPath: Path | None
 	opensslPath: Path | None
 	netcatPath: Path | None
+	reportEmailEnabled: bool = False
+	reportEmailTo: tuple = ()
+	reportEmailFrom: str | None = None
+	reportSmtpHost: str = 'localhost'
+	reportSmtpPort: int = 25
+	reportSmtpStartTls: bool = False
+	reportSmtpUsername: str | None = None
+	reportSmtpTimeout: int = 30
+	reportMaxItems: int = 50
+
+
+EMAIL_ADDRESS_PATTERN = re.compile(r'^[^@\s<>,;"]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$')
+
+
+def validateEmailAddress(value, optionName):
+	"""Adresse simple, sans nom affiché ni caractère de contrôle (aucune
+	injection d’en-tête possible)."""
+	if not EMAIL_ADDRESS_PATTERN.match(value):
+		raise ValueError(f'{optionName} : adresse e-mail invalide : {value!r}')
+	return(value)
 
 
 def optionalPath(parser, section, name):
@@ -221,6 +267,20 @@ def loadConfig(filePath=DEFAULT_CONFIG_PATH):
 	if not sources:
 		raise ValueError('[discovery] sources ne peut pas être vide')
 
+	reportEmailTo = tuple(
+		validateEmailAddress(address, '[report] email_to')
+		for address in splitConfigList(parser.get('report', 'email_to', fallback=''))
+	)
+	reportEmailEnabled = parser.getboolean('report', 'email', fallback=False)
+	if reportEmailEnabled and not reportEmailTo:
+		raise ValueError('[report] email_to est obligatoire si [report] email = true')
+	reportEmailFrom = parser.get('report', 'email_from', fallback='').strip() or None
+	if reportEmailFrom is not None:
+		validateEmailAddress(reportEmailFrom, '[report] email_from')
+	reportSmtpHost = parser.get('report', 'smtp_host', fallback='').strip() or 'localhost'
+	if not re.match(r'^[A-Za-z0-9.:-]+$', reportSmtpHost):
+		raise ValueError(f'[report] smtp_host invalide : {reportSmtpHost!r}')
+
 	dnsTimeout = parser.getfloat('discovery', 'dns_timeout', fallback=4.0)
 	if dnsTimeout <= 0:
 		raise ValueError('[discovery] dns_timeout doit être strictement positif')
@@ -236,6 +296,7 @@ def loadConfig(filePath=DEFAULT_CONFIG_PATH):
 		collectorWorkers=getPositiveInt(parser, 'discovery', 'collector_workers', 4),
 		dnsWorkers=getPositiveInt(parser, 'discovery', 'dns_workers', 20),
 		sourceTimeout=getPositiveInt(parser, 'discovery', 'source_timeout', 600),
+		amassTimeout=getOptionalPositiveInt(parser, 'discovery', 'amass_timeout'),
 		dnsTimeout=dnsTimeout,
 		wildcardSamples=getPositiveInt(parser, 'discovery', 'wildcard_samples', 2),
 		maxPages=getPositiveInt(parser, 'discovery', 'max_pages', 1000),
@@ -260,4 +321,13 @@ def loadConfig(filePath=DEFAULT_CONFIG_PATH):
 		nmapPath=optionalPath(parser, 'tools', 'nmap'),
 		opensslPath=optionalPath(parser, 'tools', 'openssl'),
 		netcatPath=optionalPath(parser, 'tools', 'netcat'),
+		reportEmailEnabled=reportEmailEnabled,
+		reportEmailTo=reportEmailTo,
+		reportEmailFrom=reportEmailFrom,
+		reportSmtpHost=reportSmtpHost,
+		reportSmtpPort=getPositiveInt(parser, 'report', 'smtp_port', 25),
+		reportSmtpStartTls=parser.getboolean('report', 'smtp_starttls', fallback=False),
+		reportSmtpUsername=parser.get('report', 'smtp_username', fallback='').strip() or None,
+		reportSmtpTimeout=getPositiveInt(parser, 'report', 'smtp_timeout', 30),
+		reportMaxItems=getPositiveInt(parser, 'report', 'max_items', 50),
 	))

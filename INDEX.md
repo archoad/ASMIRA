@@ -17,6 +17,7 @@ charger des rapports d'exécution potentiellement sensibles.
 | Découverte, normalisation et validation DNS | [`fqdnCollect.py`](fqdnCollect.py) |
 | Cartographie active HTTP/TLS et reporting | [`webTLS.py`](webTLS.py) |
 | Notation TLS et codes de constat | [`asmiraGrade.py`](asmiraGrade.py) |
+| Rapport d’analyse Markdown et envoi par e-mail | [`asmiraReport.py`](asmiraReport.py) |
 | Exemple de configuration | [`config/asmira.conf.example`](config/asmira.conf.example) |
 | Unités systemd | [`deploy/systemd/`](deploy/systemd/) |
 | Assets Elasticsearch, Fleet et Kibana | [`elastic/`](elastic/) |

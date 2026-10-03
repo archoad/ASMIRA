@@ -657,6 +657,49 @@ def testAmassCollectorParsesV4RelationsWithinScope(tmp_path, monkeypatch):
 	assert {item.source for item in findings} == {'amass'}
 
 
+def testAmassTimeoutKeepsPartialRelationsAndFailsSource(tmp_path, monkeypatch):
+	def fakeRun(cmd, **kwargs):
+		Path(cmd[cmd.index('-o') + 1]).write_text(
+			'vpn.example.com (FQDN) --> a_record --> 192.0.2.10 (IPAddress)\n'
+			'mx.provider.net (FQDN) --> a_record --> 192.0.2.20 (IPAddress)\n'
+		)
+		raise subprocess.TimeoutExpired(cmd, kwargs['timeout'])
+
+	monkeypatch.setattr(fqdnCollect.subprocess, 'run', fakeRun)
+	collector = fqdnCollect.AmassCollector(path=amassExecutable(tmp_path), timeout=60, workDir=tmp_path)
+	monkeypatch.setattr(collector, 'availability', lambda: (True, None))
+
+	findings, report = fqdnCollect.runCollector(collector, 'example.com')
+
+	assert [item.name for item in findings] == ['vpn.example.com']
+	assert report['status'] == 'failed'
+	assert report['count'] == 1
+	assert '1 nom(s) conservé(s)' in report['error']
+
+
+def testAmassTimeoutOverridesSourceTimeout():
+	collectors = fqdnCollect.buildCollectors(
+		['amass', 'subfinder'], sourceTimeout=600, amassTimeout=1200,
+	)
+
+	assert {collector.name: collector.timeout for collector in collectors} == {
+		'amass': 1200,
+		'subfinder': 600,
+	}
+	assert fqdnCollect.buildCollectors(['amass'], sourceTimeout=600)[0].timeout == 600
+
+
+def testRejectedNameIsReportedOnce(capsys, monkeypatch):
+	monkeypatch.setattr(fqdnCollect, '_warnedMessages', set())
+	findings = []
+
+	for unused in range(3):
+		fqdnCollect.appendFinding(findings, 'www.other.org', 'example.com', 'certspotter')
+
+	assert findings == []
+	assert capsys.readouterr().err.count('résultat ignoré') == 1
+
+
 @pytest.mark.parametrize('versionOutput, available', [
 	('v4.2.0\n', True),
 	('v5.1.1\n', False),

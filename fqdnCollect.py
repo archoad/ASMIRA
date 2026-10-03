@@ -248,11 +248,25 @@ def createHttpSession(retryStatuses=(429, 500, 502, 503, 504), respectRetryAfter
 	return(session)
 
 
+_warnedMessages = set()
+_warnedLock = threading.Lock()
+
+
+def warnOnce(message):
+	"""Écrit un avertissement une seule fois par processus : un même nom rejeté
+	revient à chaque certificat ou page qui le cite et noierait le journal."""
+	with _warnedLock:
+		if message in _warnedMessages:
+			return
+		_warnedMessages.add(message)
+	print(f'[avertissement] {message}', file=sys.stderr)
+
+
 def appendFinding(findings, name, domain, source, evidence=None):
 	try:
 		findings.append(createFinding(name, domain, source, evidence=evidence))
 	except (TypeError, ValueError) as error:
-		print(f'[avertissement] {source}: résultat ignoré ({error})', file=sys.stderr)
+		warnOnce(f'{source}: résultat ignoré ({error})')
 
 
 class ShodanCtlCollector(Collector):
@@ -686,8 +700,7 @@ class CertSpotterCollector(Collector):
 					try:
 						finding = createFinding(name, domain, self.name)
 					except (TypeError, ValueError) as error:
-						# Signalé une seule fois : le curseur ne repassera plus sur ce certificat.
-						print(f'[avertissement] {self.name}: résultat ignoré ({error})', file=sys.stderr)
+						warnOnce(f'{self.name}: résultat ignoré ({error})')
 						continue
 					if finding.name not in entry['names']:
 						newNames += 1
@@ -785,7 +798,14 @@ class AmassCollector(Collector):
 					check=False,
 				)
 			except subprocess.TimeoutExpired as error:
-				raise RuntimeError(f'Amass a dépassé le délai de {self.timeout + 120} s') from error
+				# Amass écrit ses relations au fil de l’énumération : celles déjà
+				# obtenues sont conservées, la source reste en échec (run partiel).
+				findings = self.parseRelations(outputFile, domain)
+				raise IncompleteCollectionError(
+					f'Amass a dépassé le délai de {self.timeout + 120} s '
+					f'({len(findings)} nom(s) conservé(s))',
+					findings,
+				) from error
 			if completed.returncode != 0:
 				message = completed.stderr.strip() or 'aucun détail disponible'
 				raise RuntimeError(f'Amass a échoué avec le code {completed.returncode}: {message}')
@@ -1453,6 +1473,7 @@ def buildCollectors(
 	shodanHistory=False,
 	workDir=TXTDNS_DIR,
 	stateDir=STATE_DIR,
+	amassTimeout=None,
 ):
 	debugDisplay()
 	collectors = []
@@ -1482,7 +1503,7 @@ def buildCollectors(
 		elif sourceName == 'amass':
 			collectors.append(AmassCollector(
 				path=amassPath,
-				timeout=sourceTimeout,
+				timeout=amassTimeout or sourceTimeout,
 				workDir=workDir,
 			))
 		elif sourceName == 'dnsx':
@@ -1531,6 +1552,7 @@ def hostCartography(
 	dnsxResolvers=None,
 	dnsxRateLimit=DEFAULT_DNSX_RATE_LIMIT,
 	shodanHistory=False,
+	amassTimeout=None,
 	collectorWorkers=DEFAULT_COLLECTOR_WORKERS,
 	dnsWorkers=DEFAULT_DNS_WORKERS,
 	dnsTimeout=DEFAULT_DNS_TIMEOUT,
@@ -1570,6 +1592,7 @@ def hostCartography(
 			shodanHistory=shodanHistory,
 			workDir=txtdnsDir,
 			stateDir=stateDir,
+			amassTimeout=amassTimeout,
 		)
 
 	findings, sourceReports = collectFindings(domains, collectors, workers=collectorWorkers)
@@ -1710,6 +1733,11 @@ def parseArgs(arguments=None):
 		help=f'Délai maximal par collecteur en secondes (défaut : {DEFAULT_SOURCE_TIMEOUT})',
 	)
 	parser.add_argument(
+		'--amass-timeout',
+		type=int,
+		help='Délai propre à Amass par domaine, en secondes (défaut : --source-timeout)',
+	)
+	parser.add_argument(
 		'--dns-timeout',
 		type=float,
 		default=DEFAULT_DNS_TIMEOUT,
@@ -1778,6 +1806,8 @@ def main(arguments=None):
 		'--max-pages': args.max_pages,
 		'--dnsx-rate-limit': args.dnsx_rate_limit,
 	}
+	if args.amass_timeout is not None:
+		numericValues['--amass-timeout'] = args.amass_timeout
 	for option, value in numericValues.items():
 		if value <= 0:
 			print(f'[erreur] {option} doit être strictement positif', file=sys.stderr)
@@ -1821,6 +1851,7 @@ def main(arguments=None):
 			stateDir=args.state_dir,
 			sourceNames=sourceNames,
 			sourceTimeout=args.source_timeout,
+			amassTimeout=args.amass_timeout,
 			maxPages=args.max_pages,
 			subfinderPath=args.subfinder_path,
 			amassPath=args.amass_path,

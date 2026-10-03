@@ -1299,7 +1299,7 @@
     {
       "type": "markdown",
       "config": {
-        "content": "### Surface d’exposition\nPorts sondés : 22, 25, 80, 443, 465, 587, 993, 995, 3389, 8080 et 8443. Pour chaque port ouvert, Asmira vérifie le chiffrement : TLS direct (443, 465, 993, 995, 8080, 8443), STARTTLS (25, 587), CredSSP/TLS ou chiffrement RDP natif (3389) ; 22 est classé SSH. Un port n’est classé en clair que si le service a répondu sans chiffrement ; un port de CDN muet reste indéterminé. Seul le port 80 est du HTTP en clair par nature et ne compte pas comme service non chiffré ; un 8080 en clair est compté (HSTS conserve le port).",
+        "content": "### Surface d’exposition\nPorts sondés : 22, 25, 80, 443, 465, 587, 993, 995, 3389, 8080 et 8443. Pour chaque port ouvert, Asmira vérifie le chiffrement : TLS direct (443, 465, 993, 995, 8080, 8443), STARTTLS (25, 587), CredSSP/TLS ou chiffrement RDP natif (3389) ; 22 est classé SSH. Un port n’est classé en clair que si le service a répondu sans chiffrement ; un port de CDN muet reste indéterminé. Seul le port 80 est du HTTP en clair par nature et ne compte pas comme service non chiffré ; un 8080 en clair n’est compté que s’il ne redirige pas vers HTTPS (« Redirection HTTPS »), car HSTS conserve le port.",
         "hide_border": true,
         "settings": {
           "open_links_in_new_tab": true
@@ -1376,7 +1376,7 @@
             "type": "bar_stacked",
             "data_source": {
               "type": "esql",
-              "query": "FROM asmira-exposure-current | WHERE asmira.exposure.services IS NOT NULL | MV_EXPAND asmira.exposure.services | DISSECT asmira.exposure.services \"%{Port}:%{Etat}\" | EVAL Chiffrement = CASE(Etat == \"tls\", \"TLS\", Etat == \"starttls\", \"STARTTLS\", Etat == \"ssh\", \"SSH\", Etat == \"clear\", \"En clair\", \"Indéterminé\") | STATS FQDN = COUNT(*) BY Port, Chiffrement | SORT FQDN DESC"
+              "query": "FROM asmira-exposure-current | WHERE asmira.exposure.services IS NOT NULL | MV_EXPAND asmira.exposure.services | DISSECT asmira.exposure.services \"%{Port}:%{Etat}\" | EVAL Chiffrement = CASE(Etat == \"tls\", \"TLS\", Etat == \"starttls\", \"STARTTLS\", Etat == \"ssh\", \"SSH\", Etat == \"redirect\", \"Redirection HTTPS\", Etat == \"clear\", \"En clair\", \"Indéterminé\") | STATS FQDN = COUNT(*) BY Port, Chiffrement | SORT FQDN DESC"
             },
             "x": {
               "column": "Port"

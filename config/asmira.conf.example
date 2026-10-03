@@ -9,6 +9,8 @@ domains =
 [discovery]
 sources = shodan-ctl,subfinder,shodan-dns,certspotter
 enable_amass = false
+# Délai propre à Amass par domaine, en secondes ; vide = source_timeout.
+amass_timeout =
 # Brute-force DNS et tentative de transfert de zone (AXFR) avec dnsx : actif,
 # réservé aux domaines autorisés. La liste de mots est obligatoire si activé
 # (ex. SecLists Discovery/DNS/subdomains-top1million-5000.txt).
@@ -47,6 +49,23 @@ pictures_dir = /var/lib/asmira/pictures
 state_dir = /var/lib/asmira/state
 # Rétention locale des exports déjà destinés à Elastic Agent.
 retention_days = 14
+
+[report]
+# Un bilan HTML autonome est écrit après chaque run dans
+# runs/<run-id>/<run-id>_report.html. Avec email = true, un e-mail de synthèse
+# le porte en pièce jointe vers email_to (adresses séparées par des virgules).
+# Le bilan est sensible.
+email = false
+email_to =
+email_from =
+# Relais SMTP : par défaut le MTA local, sans authentification.
+smtp_host = localhost
+smtp_port = 25
+smtp_starttls = false
+# Avec un compte, le mot de passe est lu dans ASMIRA_SMTP_PASSWORD (asmira.env).
+smtp_username =
+# Nombre maximal de lignes par liste détaillée du bilan.
+max_items = 50
 
 [tools]
 # Laisser vide pour utiliser la détection via PATH.

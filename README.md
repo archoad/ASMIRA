@@ -32,6 +32,8 @@ run.
 - `asmira.py` : orchestration, consolidation unique par FQDN, détection des
   changements et exports NDJSON ;
 - `asmiraGrade.py` : notation TLS des FQDN et constats associés ;
+- `asmiraReport.py` : bilan HTML autonome de chaque run et e-mail de
+  synthèse ;
 - `asmiraCommon.py` : configuration, identifiants et écritures atomiques ;
 - `elastic/` : mappings, transforms, configuration Fleet et dashboard Kibana ;
 - `deploy/` : installation Debian et unités systemd.
@@ -63,7 +65,7 @@ Les tests simulent les interactions externes et ne doivent contacter ni API ni
 cible réelle.
 
 ```sh
-python3 -m py_compile asmira.py asmiraCommon.py fqdnCollect.py webTLS.py elastic/setup.py tests/test_asmira.py tests/test_deployment_assets.py tests/test_fqdn_collect.py tests/test_web_tls.py
+python3 -m py_compile asmira.py asmiraCommon.py asmiraGrade.py asmiraReport.py fqdnCollect.py webTLS.py elastic/setup.py tests/test_asmira.py tests/test_deployment_assets.py tests/test_fqdn_collect.py tests/test_grade.py tests/test_report.py tests/test_web_tls.py
 python3 -m pytest -q
 ```
 
@@ -83,6 +85,9 @@ python3 fqdnCollect.py --enable-amass example.com
 
 Amass 4.2.0 est requis : la version 5, qui ne restitue pas ses découvertes
 (issue owasp-amass/amass#1074), est refusée avec un diagnostic explicite.
+`--amass-timeout` (ou `amass_timeout` dans `asmira.conf`) lui donne un délai
+propre ; à son dépassement, les noms déjà écrits par Amass sont conservés et la
+source est marquée en échec.
 
 Brute-force DNS et tentative de transfert de zone (AXFR) avec dnsx, uniquement
 sur un domaine autorisé :
@@ -139,7 +144,9 @@ Toute modification des seuils ou des plafonds impose d’incrémenter
   8443 sont sondés. Pour chaque port ouvert, Asmira vérifie la présence de TLS
   direct, de STARTTLS (SMTP), de CredSSP/TLS (RDP) ou classe le port en SSH ;
   un port n’est classé en clair que sur preuve, et seul le port 80 (HTTP) ne
-  compte pas comme service non chiffré. Les
+  compte pas comme service non chiffré. Un 8080 en clair qui redirige vers une
+  URL `https://` est classé `redirect` et n’est pas compté non plus : la
+  redirection prouve que le service n’est servi qu’en TLS. Les
   constats `CLEARTEXT_SERVICE` et `RDP_EXPOSED` s’appliquent aussi aux FQDN sans
   HTTPS.
 - **CAA** : le CAA effectif de chaque FQDN est celui qu’une autorité appliquerait
@@ -155,6 +162,21 @@ Toute modification des seuils ou des plafonds impose d’incrémenter
   certificat (ML-DSA composite).
 - **Suivi des constats** : chaque constat est daté de sa première observation ;
   chaque run indique les constats apparus et corrigés.
+
+## Bilan de run
+
+Après chaque run, `asmira.py` écrit `runs/<run-id>/<run-id>_report.html`, un
+bilan détaillé autonome (CSS et graphiques SVG intégrés, ni script ni ressource
+externe, CSP `default-src 'none'`) : synthèse et points d’attention, durées,
+sources par domaine et apport de chacune (dont les noms vus seulement par Amass
+et dnsx), surface par domaine, nouveaux FQDN et FQDN prioritaires, notes TLS
+comparées au run précédent, PQC, certificats, autorités émettrices, CAA,
+constats avec leur correction, chiffrement par port et hébergement. Avec
+`[report] email = true`, un e-mail texte résume le run et porte le bilan en
+pièce jointe ; il passe par le relais SMTP configuré (le MTA local par défaut),
+un mot de passe éventuel étant lu dans `ASMIRA_SMTP_PASSWORD`. Un échec du
+bilan ou de l’envoi est signalé dans le journal sans affecter le run. Le bilan
+décrit la surface d’attaque : il est sensible.
 
 ## Licence
 

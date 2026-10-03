@@ -551,8 +551,103 @@ def testPortEncryptionProbe(monkeypatch, port, output, expected):
 		return(SimpleNamespace(stdout=output))
 
 	monkeypatch.setattr(webTLS.subprocess, 'run', fakeRun)
+	monkeypatch.setattr(webTLS, 'httpRedirectsToHttps', lambda *args, **kwargs: False)
 
 	assert webTLS.testPortEncryption('192.0.2.1', 'mail.example.com', port) == expected
+
+
+CLEAR_TLS_PROBE = b'CONNECTED(00000003)\nerror:0A00010B:SSL routines::wrong version number\n'
+
+
+@pytest.mark.parametrize('redirect, expected', [
+	(True, 'redirect'),
+	(False, 'clear'),
+	(None, 'clear'),
+])
+def testPort8080RedirectToHttpsIsNotCleartext(monkeypatch, redirect, expected):
+	probes = []
+	monkeypatch.setattr(
+		webTLS.subprocess, 'run', lambda command, **kwargs: SimpleNamespace(stdout=CLEAR_TLS_PROBE),
+	)
+	monkeypatch.setattr(
+		webTLS, 'httpRedirectsToHttps', lambda *args, **kwargs: probes.append(args) or redirect,
+	)
+
+	assert webTLS.testPortEncryption('192.0.2.1', 'www.example.com', 8080) == expected
+	assert probes == [('192.0.2.1', 'www.example.com', 8080)]
+
+
+def testRedirectProbeOnlyRunsOnHttpRedirectPorts(monkeypatch):
+	monkeypatch.setattr(
+		webTLS.subprocess, 'run', lambda command, **kwargs: SimpleNamespace(stdout=CLEAR_TLS_PROBE),
+	)
+	monkeypatch.setattr(
+		webTLS, 'httpRedirectsToHttps', lambda *args, **kwargs: pytest.fail('sonde HTTP inattendue'),
+	)
+
+	assert webTLS.testPortEncryption('192.0.2.1', 'www.example.com', 8443) == 'clear'
+
+
+@pytest.mark.parametrize('response, expected', [
+	(b'HTTP/1.1 301 Moved Permanently\r\nLocation: https://www.example.com/\r\n\r\n', True),
+	(b'HTTP/1.1 308 Permanent Redirect\r\nlocation:HTTPS://www.example.com:443/\r\n\r\n', True),
+	(b'HTTP/1.0 302 Found\r\nLocation: http://www.example.com/\r\n\r\n', False),
+	(b'HTTP/1.1 302 Found\r\nLocation: /login\r\n\r\n', False),
+	(b'HTTP/1.1 302 Found\r\nX-Location: https://www.example.com/\r\n\r\n', False),
+	(b'HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n<a href="https://x">', False),
+	(b'SSH-2.0-OpenSSH_9.6\r\n', None),
+])
+def testParseHttpRedirect(response, expected):
+	assert webTLS.parseHttpRedirect(response) is expected
+
+
+class FakeHttpConnection:
+	def __init__(self, chunks):
+		self.chunks = list(chunks)
+		self.sent = b''
+
+	def __enter__(self):
+		return(self)
+
+	def __exit__(self, *args):
+		return(False)
+
+	def sendall(self, data):
+		self.sent += data
+
+	def settimeout(self, value):
+		pass
+
+	def recv(self, size):
+		return(self.chunks.pop(0) if self.chunks else b'')
+
+
+def testHttpRedirectProbeSendsHostAndReadsSplitHeaders(monkeypatch):
+	connection = FakeHttpConnection([
+		b'HTTP/1.1 301 Moved Permanently\r\nLoca',
+		b'tion: https://www.example.com/\r\n\r\nbody',
+	])
+	monkeypatch.setattr(webTLS.socket, 'create_connection', lambda *args, **kwargs: connection)
+
+	assert webTLS.httpRedirectsToHttps('192.0.2.1', 'www.example.com', 8080) is True
+	assert b'Host: www.example.com\r\n' in connection.sent
+
+
+def testHttpRedirectProbeWithoutAnswerIsUndetermined(monkeypatch):
+	def refuse(*args, **kwargs):
+		raise ConnectionResetError()
+
+	monkeypatch.setattr(webTLS.socket, 'create_connection', refuse)
+
+	assert webTLS.httpRedirectsToHttps('192.0.2.1', 'www.example.com', 8080) is None
+
+
+def testHttpRedirectProbeBoundsHeaderSize(monkeypatch):
+	connection = FakeHttpConnection([b'HTTP/1.1 200 OK\r\nX: ' + b'a' * 4096] * 10)
+	monkeypatch.setattr(webTLS.socket, 'create_connection', lambda *args, **kwargs: connection)
+
+	assert webTLS.httpRedirectsToHttps('192.0.2.1', 'www.example.com', 8080) is False
+	assert len(connection.chunks) < 10
 
 
 def testSilentEstablishedConnectionIsUndetermined(monkeypatch):
