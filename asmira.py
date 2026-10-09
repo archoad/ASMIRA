@@ -155,6 +155,14 @@ def issuerAuthorizedByCaa(caa, issuerOrganizations):
 	))
 
 
+PORT_CERTIFICATE_FINDINGS = {
+	'expired': 'PORT_CERT_EXPIRED',
+	'untrusted': 'PORT_CERT_UNTRUSTED',
+	'expiring': 'PORT_CERT_EXPIRES_30D',
+	'other_name': 'PORT_NAME_NOT_SERVED',
+}
+
+
 def addFindings(tls, codes):
 	tls['findings'] = sorted(set(tls.get('findings') or []) | set(codes))
 	tls['findings_severity'] = sorted(
@@ -597,6 +605,10 @@ def buildFqdnObservation(items, runId):
 				str(port): {
 					'state': itemValues(items, f'port{port}'),
 					'tls': itemValues(items, f'tls_port{port}'),
+					**(
+						{'certificate': itemValues(items, f'cert_port{port}')}
+						if port in webTLS.CERTIFICATE_PORTS else {}
+					),
 				}
 				for port in webTLS.SCANNED_PORTS
 			},
@@ -698,6 +710,28 @@ def buildFqdnObservation(items, runId):
 	# le port 3389 peut accepter la connexion sans rien servir.
 	if any(item.get('port3389') == 'open' and item.get('tls_port3389') in ('tls', 'clear') for item in items):
 		exposureFindings.add('RDP_EXPOSED')
+	# Le port 443 refuse explicitement ce nom : il n’y est pas servi.
+	if any(
+		item.get('port443') == 'open'
+		and not item.get('certificate_sha256')
+		and item.get('tls_failure') == 'unrecognized_name'
+		for item in items
+	):
+		exposureFindings.add('TLS_NAME_NOT_SERVED')
+	# Certificats des autres ports, lus avec ce nom en SNI. Un certificat d’un
+	# autre nom signifie que le port, ouvert sur l’adresse partagée, ne sert pas
+	# ce FQDN : il n’est donc pas jugé sur son expiration ni sa chaîne.
+	portCertificates = {
+		item.get(f'cert_port{port}')
+		for item in items
+		for port in webTLS.CERTIFICATE_PORTS
+		if item.get(f'port{port}') == 'open'
+	}
+	exposureFindings.update(
+		code
+		for state, code in PORT_CERTIFICATE_FINDINGS.items()
+		if state in portCertificates
+	)
 	if exposureFindings:
 		addFindings(tls, exposureFindings)
 	return(event)

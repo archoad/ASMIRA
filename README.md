@@ -133,10 +133,17 @@ sans prétendre le reproduire : il ne note que ce que la sonde observe.
   n’est pas reconnue ; M si le nom n’est pas couvert. La note cryptographique
   reste disponible dans `grade_if_trusted`.
 - **Agrégation** : un FQDN à plusieurs IP prend la note de la plus faible ;
-  NA désigne un port 443 ouvert sans session TLS exploitable.
+  NA désigne un port 443 ouvert sans session TLS exploitable, après une seconde
+  tentative immédiate et une seconde passe en fin de cartographie en cas
+  d’échec passager (délai, réinitialisation, fermeture).
+- **Nom non servi (v3)** : toutes les sondes TLS envoient le FQDN comme nom de
+  serveur (SNI). Un port 443 qui refuse explicitement ce nom (alerte
+  `unrecognized_name`) applique la configuration recommandée pour un nom
+  inconnu : le FQDN n’est pas noté et reçoit le constat informatif
+  `TLS_NAME_NOT_SERVED`, au lieu de `TLS_HANDSHAKE_FAILED`.
 
 Toute modification des seuils ou des plafonds impose d’incrémenter
-`GRADE_VERSION`, stocké avec chaque note.
+`GRADE_VERSION`, stocké avec chaque note (version 3 depuis le 5 octobre 2026).
 
 ## Indicateurs complémentaires
 
@@ -146,7 +153,12 @@ Toute modification des seuils ou des plafonds impose d’incrémenter
   un port n’est classé en clair que sur preuve, et seul le port 80 (HTTP) ne
   compte pas comme service non chiffré. Un 8080 en clair qui redirige vers une
   URL `https://` est classé `redirect` et n’est pas compté non plus : la
-  redirection prouve que le service n’est servi qu’en TLS. Les
+  redirection prouve que le service n’est servi qu’en TLS. Les ports sont
+  découverts par adresse IP et attribués à tous les FQDN de cette adresse ; sur
+  465, 993, 995, 8080, 8443 et en STARTTLS sur 25 et 587, le certificat présenté
+  pour le FQDN (SNI) est lu : expiré, non fiable ou proche de l’expiration, il
+  lève `PORT_CERT_*` ; s’il couvre un autre nom, le port ne sert pas ce FQDN
+  (`PORT_NAME_NOT_SERVED`, informatif). Les
   constats `CLEARTEXT_SERVICE` et `RDP_EXPOSED` s’appliquent aussi aux FQDN sans
   HTTPS.
 - **CAA** : le CAA effectif de chaque FQDN est celui qu’une autorité appliquerait

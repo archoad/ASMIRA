@@ -11,7 +11,7 @@ GRADE_VERSION, afin que l’historique reste comparable.
 import re
 
 
-GRADE_VERSION = '2'
+GRADE_VERSION = '3'
 
 # Groupes d’échange de clés hybrides : ML-KEM associé à un algorithme classique,
 # l’approche exigée par l’ANSSI. Dupliqué de webTLS pour garder ce module sans
@@ -39,11 +39,12 @@ MAX_CERTIFICATE_LIFETIME_DAYS = 398
 
 # code : (gravité, plafond éventuel, texte de correction)
 FINDINGS = {
-	'TLS_HANDSHAKE_FAILED': ('high', None, 'Le port 443 est ouvert mais aucune session TLS n’a pu être établie.'),
+	'TLS_HANDSHAKE_FAILED': ('high', None, 'Le port 443 est ouvert mais aucune session TLS n’a pu être établie, même après une seconde tentative.'),
+	'TLS_NAME_NOT_SERVED': ('info', None, 'Le port 443 de cette adresse refuse ce nom (alerte TLS unrecognized_name) : le FQDN pointe vers un service qui ne le sert pas. Retirer ou corriger l’enregistrement DNS si ce nom n’a pas lieu d’y pointer.'),
 	'CERT_EXPIRED': ('critical', 'T', 'Renouveler le certificat expiré.'),
 	'CERT_SELF_SIGNED': ('critical', 'T', 'Remplacer le certificat auto-signé par un certificat émis par une autorité reconnue.'),
 	'CHAIN_UNTRUSTED': ('critical', 'T', 'Corriger la chaîne de certification (certificats intermédiaires manquants ou autorité non reconnue).'),
-	'CERT_HOSTNAME_MISMATCH': ('critical', 'M', 'Émettre un certificat dont le CN ou les SAN couvrent ce FQDN.'),
+	'CERT_HOSTNAME_MISMATCH': ('critical', 'M', 'Le certificat présenté sur le port 443 ne couvre pas ce FQDN. Si le nom doit y être servi, émettre un certificat dont les SAN l’incluent ; sinon, retirer ou corriger l’enregistrement DNS qui le fait pointer vers ce service.'),
 	'NULL_OR_EXPORT_CIPHER': ('critical', 'F', 'Désactiver les suites NULL, EXPORT et anonymes.'),
 	'WEAK_KEY_UNDER_1024': ('critical', 'F', 'Réémettre le certificat avec une clé RSA d’au moins 2048 bits ou ECDSA P-256.'),
 	'MD5_SIGNATURE': ('critical', 'F', 'Réémettre le certificat avec une signature SHA-256 ou plus.'),
@@ -60,6 +61,10 @@ FINDINGS = {
 	'HSTS_MISSING': ('info', None, 'Ajouter l’en-tête Strict-Transport-Security (max-age ≥ 6 mois) pour viser A+.'),
 	'CERT_EXPIRES_30D': ('high', None, 'Le certificat expire dans moins de 30 jours : planifier le renouvellement.'),
 	'CERT_LIFETIME_OVER_398D': ('medium', None, 'Durée de vie supérieure à 398 jours : non conforme aux exigences CA/B Forum.'),
+	'PORT_CERT_EXPIRED': ('high', None, 'Sur un autre port que 443 (messagerie, 8443…), le certificat présenté pour ce nom a expiré : le renouveler.'),
+	'PORT_CERT_UNTRUSTED': ('high', None, 'Sur un autre port que 443, le certificat présenté pour ce nom n’est pas fiable (auto-signé ou chaîne incomplète) : le remplacer.'),
+	'PORT_CERT_EXPIRES_30D': ('high', None, 'Sur un autre port que 443, le certificat présenté pour ce nom expire dans moins de 30 jours : planifier le renouvellement.'),
+	'PORT_NAME_NOT_SERVED': ('info', None, 'Sur certains ports, l’adresse de ce FQDN présente le certificat d’un autre nom : le port est ouvert sur l’adresse mais ne sert pas ce nom. Vérifier que l’exposition est voulue, sinon filtrer le port ou corriger le DNS.'),
 	'NO_PQC_KEX': ('low', None, 'Activer un échange de clés hybride en TLS 1.3 (X25519MLKEM768, SecP256r1MLKEM768 ou SecP384r1MLKEM1024 ; OpenSSL ≥ 3.5, BoringSSL ou équivalent) contre le déchiffrement différé.'),
 	'PQC_KEX_NOT_HYBRID': ('medium', None, 'ML-KEM est proposé seul : l’ANSSI impose de l’associer à un algorithme classique. Proposer un groupe hybride (X25519MLKEM768, SecP256r1MLKEM768 ou SecP384r1MLKEM1024).'),
 	'RDP_EXPOSED': ('high', None, 'Le bureau à distance (RDP, 3389) est exposé sur Internet : le placer derrière un VPN ou une passerelle d’accès.'),
@@ -203,8 +208,12 @@ def endpointCiphers(item):
 
 
 def gradeEndpoint(item):
-	"""Note un couple FQDN/IP. Renvoie None si le port 443 n’est pas ouvert."""
+	"""Note un couple FQDN/IP. Renvoie None si le port 443 n’est pas ouvert ou
+	s’il refuse explicitement ce nom (alerte unrecognized_name) : le nom n’y est
+	pas servi, ce qui est la configuration recommandée pour un nom inconnu (v3)."""
 	if item.get('port443') != 'open':
+		return(None)
+	if not item.get('certificate_sha256') and item.get('tls_failure') == 'unrecognized_name':
 		return(None)
 	if not item.get('certificate_sha256'):
 		return({

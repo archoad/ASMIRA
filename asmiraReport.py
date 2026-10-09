@@ -47,6 +47,13 @@ KEX_STATES = (
 	('no_tls13', 'Sans TLS 1.3'),
 	('unknown', 'Indéterminé'),
 )
+PORT_CERTIFICATE_STATES = (
+	('valid', 'Valide'),
+	('expiring', 'Expire sous 30 jours'),
+	('expired', 'Expiré'),
+	('untrusted', 'Non fiable'),
+	('other_name', 'Autre nom (port non servi)'),
+)
 CHANGE_LABELS = (
 	('new', 'Nouveaux'),
 	('updated', 'Modifiés'),
@@ -237,6 +244,13 @@ def analyseExposure(exposureEvents, previousEvents, partial):
 			if separator and port.isdigit():
 				states[(int(port), state)] += 1
 
+	portCertificates = Counter(
+		(int(port), state)
+		for event in events
+		for port, detail in (exposureOf(event).get('port') or {}).items()
+		if port.isdigit()
+		for state in set((detail or {}).get('certificate') or [])
+	)
 	findingCounts = Counter(code for event in events for code in tlsOf(event).get('findings') or [])
 	opened = Counter(code for event in events for code in tlsOf(event).get('findings_opened') or [])
 	resolved = Counter(code for event in events for code in tlsOf(event).get('findings_resolved') or [])
@@ -307,6 +321,7 @@ def analyseExposure(exposureEvents, previousEvents, partial):
 		'resolved_total': sum(resolved.values()),
 		'open_ports': openPorts,
 		'port_states': states,
+		'port_certificates': portCertificates,
 		'cleartext': sorted(
 			(event for event in events if exposureOf(event).get('cleartext_ports')),
 			key=lambda event: fqdnOf(event) or '',
@@ -972,6 +987,21 @@ def renderCertificates(analysis, maxItems):
 			('FQDN', 'Expiré depuis (jours)'), [(fqdnOf(event), fmt(-days)) for event, days in exposure['expired'][:maxItems]],
 			numeric=(1,),
 		), len(exposure['expired']), maxItems))
+	if exposure['port_certificates']:
+		ports = sorted({port for port, unused in exposure['port_certificates']})
+		parts += [
+			Html('<h3>Certificats des autres ports</h3>'),
+			paragraph(
+				'Sur 465, 993, 995, 8443, 8080 et en STARTTLS sur 25 et 587, le certificat est lu avec le FQDN '
+				'comme nom de serveur (SNI). Les ports sont découverts par adresse IP : un port ouvert sur une '
+				'adresse partagée peut servir d’autres noms. Un certificat d’un autre nom signale donc un port '
+				'qui ne sert pas ce FQDN ; il n’est pas jugé sur son expiration ni sur sa chaîne.'
+			),
+			table(['Port', *[label for unused, label in PORT_CERTIFICATE_STATES]], [
+				[port, *[fmtOrBlank(exposure['port_certificates'].get((port, state), 0)) for state, unused in PORT_CERTIFICATE_STATES]]
+				for port in ports
+			], numeric=tuple(range(1, len(PORT_CERTIFICATE_STATES) + 1))),
+		]
 	if exposure['issuers']:
 		parts += [
 			Html('<h3>Autorités émettrices</h3>'),

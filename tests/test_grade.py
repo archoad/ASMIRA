@@ -211,3 +211,16 @@ def testUnknownKeyExchangeBlocksAPlusWithoutFinding():
 
 	assert result['grade'] == 'A'
 	assert not {'NO_PQC_KEX', 'PQC_KEX_NOT_HYBRID'} & set(result['findings'])
+
+
+def testNameRefusedOn443IsNotGraded():
+	assert asmiraGrade.gradeEndpoint(endpoint(certificate_sha256=None, tls_failure='unrecognized_name')) is None
+
+
+@pytest.mark.parametrize('failure', ['reset', 'alert:40', 'timeout', None])
+def testOtherHandshakeFailuresStayNotGradedWithFinding(failure):
+	result = asmiraGrade.gradeEndpoint(endpoint(certificate_sha256=None, tls_failure=failure))
+
+	assert result['grade'] == asmiraGrade.NOT_GRADED
+	assert result['findings'] == ['TLS_HANDSHAKE_FAILED']
+

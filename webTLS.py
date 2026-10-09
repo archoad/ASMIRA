@@ -29,6 +29,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 from cryptography import x509
 from cryptography.exceptions import UnsupportedAlgorithm
+from cryptography.utils import CryptographyDeprecationWarning
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import rsa, dsa, ec, ed25519, ed448, x25519, x448
 
@@ -81,6 +82,10 @@ STARTTLS_PORTS = {25: 'smtp', 587: 'smtp'}
 # pas partie : HSTS conserve le port lors de la bascule vers HTTPS (RFC 6797,
 # section 8.3), et la sonde n’y classe « clear » qu’une réponse en clair prouvée.
 HTTP_CLEARTEXT_PORTS = (80,)
+# Ports dont le certificat est lu pour le FQDN en plus du 443 (testTLS).
+CERTIFICATE_PORTS = tuple(sorted(
+	port for port in set(IMPLICIT_TLS_PORTS) | set(STARTTLS_PORTS) if port != 443
+))
 # Ports HTTP alternatifs où une réponse en clair qui redirige vers une URL https://
 # est classée « redirect » : le service n’est servi qu’en TLS, la redirection en
 # est la preuve. Une redirection relative ou vers http:// reste « clear ».
@@ -88,6 +93,22 @@ HTTP_REDIRECT_PORTS = (8080,)
 HTTP_REDIRECT_STATUSES = (301, 302, 303, 307, 308)
 HTTP_MAX_HEADER = 16384
 PORT_PROBE_TIMEOUT = 5
+# Seconde tentative de testTLS après un échec passager (délai, réinitialisation,
+# fermeture) : pendant un balayage, un serveur peut limiter temporairement la sonde.
+TLS_RETRY_DELAY = 5
+TLS_TRANSIENT_FAILURES = ('timeout', 'reset', 'refused', 'eof', 'no_certificate')
+# Seconde passe en fin de cartographie pour les échecs passagers persistants :
+# certains serveurs freinent la sonde pendant tout le balayage de leur domaine.
+# Elle démarre après un délai et avec peu de workers pour ne pas les solliciter.
+TLS_SECOND_PASS_DELAY = 60
+TLS_SECOND_PASS_WORKERS = 2
+
+# Les certificats observés ne sont pas sous notre contrôle : un numéro de série
+# négatif (non conforme à la RFC 5280) reste lisible et ne doit pas inonder le
+# journal d’avertissements.
+warnings.filterwarnings('ignore', category=CryptographyDeprecationWarning)
+# Un certificat expirant dans ce délai est signalé (comme pour le port 443).
+CERTIFICATE_WARNING_DAYS = 30
 # Groupes d’échange de clés post-quantiques connus d’OpenSSL 3.5. Les groupes
 # hybrides associent ML-KEM (FIPS 203) à un algorithme classique, comme l’exige
 # l’ANSSI ; les groupes ML-KEM seuls ne satisfont pas cette exigence.
@@ -1019,8 +1040,25 @@ def testTLSold(hostip):
 	return(testTLS(hostip, hostip))
 
 
-def testTLS(hostip, host, commandSemaphore=None):
-	debugDisplay()
+def classifyTlsFailure(output):
+	"""Cause d’une négociation TLS sans certificat : unrecognized_name (alerte 112,
+	le serveur refuse ce nom), alert:<code>, reset, refused, eof ou no_certificate."""
+	if re.search(r'alert number 112\b|unrecognized.name', output, re.IGNORECASE):
+		return('unrecognized_name')
+	match = re.search(r'alert number (\d+)', output)
+	if match:
+		return(f'alert:{match.group(1)}')
+	if re.search(r'errno=104|connection reset', output, re.IGNORECASE):
+		return('reset')
+	if re.search(r'errno=111|connection refused', output, re.IGNORECASE):
+		return('refused')
+	if re.search(r'unexpected eof|errno=0', output, re.IGNORECASE):
+		return('eof')
+	return('no_certificate')
+
+
+def runTlsProbe(hostip, host, commandSemaphore=None):
+	"""Une négociation TLS sur 443 : (données du certificat, cause d’échec)."""
 	cmd = [
 		dicTools['openssl'],
 		's_client',
@@ -1046,12 +1084,31 @@ def testTLS(hostip, host, commandSemaphore=None):
 				timeout=TLS_TIMEOUT,
 				check=False,
 			)
-	except (OSError, subprocess.TimeoutExpired):
-		return(None)
+	except subprocess.TimeoutExpired:
+		return(None, 'timeout')
+	except OSError:
+		return(None, 'no_certificate')
 	try:
-		return(extractTLSdata(completed.stdout))
+		data = extractTLSdata(completed.stdout)
 	except (TypeError, ValueError, OpenSSL.crypto.Error):
-		return(None)
+		data = None
+	if data:
+		return(data, None)
+	output = completed.stdout.decode(errors='replace') if isinstance(completed.stdout, bytes) else str(completed.stdout or '')
+	return(None, classifyTlsFailure(output))
+
+
+def testTLS(hostip, host, commandSemaphore=None):
+	"""Certificat et session TLS du port 443 pour ce nom (SNI). Un échec passager
+	est retenté une fois ; sinon la cause est renvoyée dans tls_failure."""
+	debugDisplay()
+	data, failure = runTlsProbe(hostip, host, commandSemaphore=commandSemaphore)
+	if failure in TLS_TRANSIENT_FAILURES:
+		time.sleep(TLS_RETRY_DELAY)
+		data, failure = runTlsProbe(hostip, host, commandSemaphore=commandSemaphore)
+	if data:
+		return(data)
+	return({'tls_failure': failure})
 
 
 def testOneCipherSuite(host, hostip, cipherSuite, commandSemaphore=None):
@@ -1307,7 +1364,6 @@ def buildListIps(
 			if target in seenTargets:
 				continue
 			seenTargets.add(target)
-			print('%d %s (%s) --> %s' % (index, host, ns[0] if ns else 'NS inconnu', ip))
 			result = {
 				'host': host,
 				'ip': ip,
@@ -1345,7 +1401,7 @@ def buildListIps(
 		else Path(destinationFile)
 	)
 	atomicWriteJson(destinationFile, output)
-	print('### IP list built')
+	print(f'### Liste des IP : {len(output)} couple(s) FQDN/IP pour {len(hostsByIp)} adresse(s)')
 	return(output)
 
 
@@ -1517,15 +1573,39 @@ def testPortEncryption(hostip, host, port, commandSemaphore=None):
 	starttls, ssh, redirect (HTTP en clair qui redirige vers HTTPS, ports de
 	HTTP_REDIRECT_PORTS), clear (le service répond sans chiffrement) ou None
 	(aucune réponse probante, par exemple un port de CDN qui accepte la connexion)."""
+	return(probePort(hostip, host, port, commandSemaphore=commandSemaphore)[0])
+
+
+def classifyPortCertificate(data):
+	"""État du certificat présenté pour ce nom sur un port : other_name (il ne
+	couvre pas le FQDN : le port sert un autre nom), expired, untrusted
+	(auto-signé ou chaîne non vérifiée), expiring (moins de
+	CERTIFICATE_WARNING_DAYS jours) ou valid."""
+	verifyMessage = (data.get('verify_message') or '').lower()
+	if 'hostname mismatch' in verifyMessage:
+		return('other_name')
+	if data.get('has_expired'):
+		return('expired')
+	if data.get('self-signed') or data.get('chain_valid') is False:
+		return('untrusted')
+	remain = data.get('remain')
+	if isinstance(remain, int) and remain <= CERTIFICATE_WARNING_DAYS:
+		return('expiring')
+	return('valid')
+
+
+def probePort(hostip, host, port, commandSemaphore=None):
+	"""(état du chiffrement, certificat présenté) d’un port ouvert ; le
+	certificat n’est lu que pour une session TLS ou STARTTLS établie."""
 	if port == 22:
-		return('ssh')
+		return('ssh', None)
 	if port == 80:
-		return('clear')
+		return('clear', None)
 	if port in STARTTLS_PORTS:
 		with commandSlot(commandSemaphore):
 			offered = smtpOffersStartTls(hostip, port)
 		if offered is not True:
-			return(None if offered is None else 'clear')
+			return(None if offered is None else 'clear', None)
 	if port == 3389:
 		cmd = [
 			dicTools['nmap'], '-n', '-Pn', *getNmapIpVersionArgs(hostip),
@@ -1536,6 +1616,8 @@ def testPortEncryption(hostip, host, port, commandSemaphore=None):
 			dicTools['openssl'], 's_client',
 			'-connect', formatHostPort(hostip, port),
 			'-servername', host,
+			'-verify_hostname', host,
+			'-CAfile', requests.certs.where(),
 		]
 		if port in STARTTLS_PORTS:
 			cmd += ['-starttls', STARTTLS_PORTS[port]]
@@ -1550,28 +1632,34 @@ def testPortEncryption(hostip, host, port, commandSemaphore=None):
 				check=False,
 			)
 	except (OSError, subprocess.TimeoutExpired):
-		return(None)
+		return(None, None)
 	output = completed.stdout.decode(errors='replace')
 	if port == 3389:
 		# CredSSP (NLA) et la couche « SSL » reposent sur TLS ; « Native RDP » seul
 		# signifie le chiffrement RDP historique (RC4). Sans réponse RDP, le port
 		# n’est pas un service RDP identifié.
 		if re.search(r'(?:CredSSP[^:]*|SSL):\s*SUCCESS', output):
-			return('tls')
+			return('tls', None)
 		if re.search(r'Native RDP:\s*SUCCESS', output):
-			return('clear')
-		return(None)
+			return('clear', None)
+		return(None, None)
 	result = classifyTlsProbe(output)
-	if result == 'tls' and port in STARTTLS_PORTS:
-		return('starttls')
+	if result == 'tls':
+		try:
+			certificate = extractTLSdata(output)
+		except (TypeError, ValueError, OpenSSL.crypto.Error):
+			certificate = None
+		return('starttls' if port in STARTTLS_PORTS else 'tls', certificate)
 	if result == 'clear' and port in HTTP_REDIRECT_PORTS:
 		with commandSlot(commandSemaphore):
 			if httpRedirectsToHttps(hostip, host, port) is True:
-				return('redirect')
-	return(result)
+				return('redirect', None)
+	return(result, None)
 
 
 def analysePortEncryption(item, ip, host, commandSemaphore=None):
+	"""Chiffrement de chaque port ouvert et, hors 443 (analysé par testTLS),
+	état du certificat présenté pour ce nom (cert_port<port>, cert_days_port<port>)."""
 	result = {}
 	for port in SCANNED_PORTS:
 		if item.get(f'port{port}') != 'open':
@@ -1579,9 +1667,11 @@ def analysePortEncryption(item, ip, host, commandSemaphore=None):
 		if port == 443 and item.get('certificate_sha256'):
 			result['tls_port443'] = 'tls'
 			continue
-		result[f'tls_port{port}'] = testPortEncryption(
-			ip, host, port, commandSemaphore=commandSemaphore,
-		)
+		state, certificate = probePort(ip, host, port, commandSemaphore=commandSemaphore)
+		result[f'tls_port{port}'] = state
+		if port != 443 and certificate:
+			result[f'cert_port{port}'] = classifyPortCertificate(certificate)
+			result[f'cert_days_port{port}'] = certificate.get('remain')
 	return(result)
 
 
@@ -1711,6 +1801,59 @@ def analyseEndpoint(
 	return(item)
 
 
+def needsTlsSecondPass(item):
+	return(
+		item.get('port443') == 'open'
+		and not item.get('certificate_sha256')
+		and item.get('tls_failure') in TLS_TRANSIENT_FAILURES
+		and not item.get('tls_second_pass')
+	)
+
+
+def retryTlsFailures(
+	completedByKey,
+	captureScreenshots=False,
+	commandSemaphore=None,
+	cipherWorkers=8,
+	delay=None,
+	workers=None,
+):
+	"""Seconde passe sur les couples dont le port 443 n’a donné aucun certificat
+	pour une cause passagère, une fois le balayage terminé. Un couple récupéré est
+	entièrement réanalysé ; sinon l’analyse initiale est conservée avec la
+	dernière cause. tls_second_pass évite de repasser après une reprise."""
+	keys = [key for key, item in completedByKey.items() if needsTlsSecondPass(item)]
+	if not keys:
+		return(0)
+	delay = TLS_SECOND_PASS_DELAY if delay is None else delay
+	workers = TLS_SECOND_PASS_WORKERS if workers is None else workers
+	print(f'### Seconde passe TLS : {len(keys)} couple(s) en échec passager, reprise dans {delay} s')
+	time.sleep(delay)
+
+	def retry(key):
+		previous = completedByKey[key]
+		base = {
+			name: value for name, value in previous.items()
+			if name not in ('tls_failure', 'scan_status', 'scan_error', 'scan_duration_seconds')
+		}
+		return(key, analyseEndpoint(base, captureScreenshots, commandSemaphore, cipherWorkers))
+
+	recovered = 0
+	with ThreadPoolExecutor(max_workers=min(workers, len(keys))) as executor:
+		for key, result in executor.map(retry, keys):
+			if result.get('certificate_sha256'):
+				recovered += 1
+				completedByKey[key] = {**result, 'tls_second_pass': True}
+			else:
+				completedByKey[key] = {
+					**completedByKey[key],
+					'tls_second_pass': True,
+					'tls_failure': result.get('tls_failure') or completedByKey[key].get('tls_failure'),
+				}
+	print(f'### Seconde passe TLS : {recovered}/{len(keys)} couple(s) récupéré(s)')
+	return(recovered)
+
+
 def tlsAnalyse(
 	captureScreenshots=True,
 	listIpFile=None,
@@ -1790,6 +1933,12 @@ def tlsAnalyse(
 					atomicWriteJson(checkpointFile, orderedCheckpoint)
 					sinceCheckpoint = 0
 
+	retryTlsFailures(
+		completedByKey,
+		captureScreenshots=captureScreenshots,
+		commandSemaphore=commandSemaphore,
+		cipherWorkers=cipherWorkers,
+	)
 	output = [
 		completedByKey[targetKey(item)]
 		for item in output

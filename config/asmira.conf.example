@@ -45,7 +45,7 @@ xlsx = false
 runs_dir = /var/lib/asmira/runs
 export_dir = /var/lib/asmira/export
 pictures_dir = /var/lib/asmira/pictures
-# État persistant des collecteurs incrémentaux (curseur Cert Spotter).
+# État persistant des collecteurs (curseur Cert Spotter, cache Shodan DNS).
 state_dir = /var/lib/asmira/state
 # Rétention locale des exports déjà destinés à Elastic Agent.
 retention_days = 14

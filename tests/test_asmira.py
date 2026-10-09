@@ -586,8 +586,46 @@ def testExposureEventsSummarisePortsAndFlagCleartextAndRdp():
 	assert exposure['cleartext_ports'] == [25]
 	assert '25:clear' in exposure['services']
 	assert exposure['port']['3389'] == {'state': ['open'], 'tls': ['tls']}
+	assert exposure['port']['25'] == {'state': ['open'], 'tls': ['clear'], 'certificate': []}
 	assert {'CLEARTEXT_SERVICE', 'RDP_EXPOSED'} <= set(exposure['tls']['findings'])
 	assert exposure['tls']['max_severity'] == 'high'
+
+
+def testNameRefusedOn443IsReportedWithoutGrade():
+	event = asmira.buildExposureEvents([gradedItem(
+		certificate_sha256=None, tls_failure='unrecognized_name', tls_port443='tls',
+	)], '20260731T200000Z-12345678')[0]
+	tls = event['asmira']['exposure']['tls']
+
+	assert 'grade' not in tls
+	assert tls['findings'] == ['TLS_NAME_NOT_SERVED']
+	assert tls['max_severity'] == 'info'
+
+
+@pytest.mark.parametrize('state, finding', [
+	('expired', 'PORT_CERT_EXPIRED'),
+	('untrusted', 'PORT_CERT_UNTRUSTED'),
+	('expiring', 'PORT_CERT_EXPIRES_30D'),
+	('other_name', 'PORT_NAME_NOT_SERVED'),
+])
+def testCertificatesOfOtherPortsRaiseFindings(state, finding):
+	event = asmira.buildExposureEvents([gradedItem(
+		port993='open', tls_port993='tls', cert_port993=state, tls_port443='tls',
+	)], '20260731T200000Z-12345678')[0]
+	exposure = event['asmira']['exposure']
+
+	assert exposure['port']['993'] == {'state': ['open'], 'tls': ['tls'], 'certificate': [state]}
+	assert finding in exposure['tls']['findings']
+
+
+def testValidCertificateOnOtherPortRaisesNothing():
+	event = asmira.buildExposureEvents([gradedItem(
+		port8443='open', tls_port8443='tls', cert_port8443='valid', tls_port443='tls',
+	)], '20260731T200000Z-12345678')[0]
+
+	assert not {
+		code for code in event['asmira']['exposure']['tls']['findings'] if code.startswith('PORT_')
+	}
 
 
 def testOnlyPort80IsExemptFromCleartextAccounting():

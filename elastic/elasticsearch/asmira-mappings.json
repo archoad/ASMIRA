@@ -141,16 +141,16 @@
                 "port": {
                   "properties": {
                     "22": { "properties": { "state": { "type": "keyword" }, "tls": { "type": "keyword" } } },
-                    "25": { "properties": { "state": { "type": "keyword" }, "tls": { "type": "keyword" } } },
+                    "25": { "properties": { "state": { "type": "keyword" }, "tls": { "type": "keyword" }, "certificate": { "type": "keyword" } } },
                     "80": { "properties": { "state": { "type": "keyword" }, "tls": { "type": "keyword" } } },
                     "443": { "properties": { "state": { "type": "keyword" }, "tls": { "type": "keyword" } } },
-                    "465": { "properties": { "state": { "type": "keyword" }, "tls": { "type": "keyword" } } },
-                    "587": { "properties": { "state": { "type": "keyword" }, "tls": { "type": "keyword" } } },
-                    "993": { "properties": { "state": { "type": "keyword" }, "tls": { "type": "keyword" } } },
-                    "995": { "properties": { "state": { "type": "keyword" }, "tls": { "type": "keyword" } } },
+                    "465": { "properties": { "state": { "type": "keyword" }, "tls": { "type": "keyword" }, "certificate": { "type": "keyword" } } },
+                    "587": { "properties": { "state": { "type": "keyword" }, "tls": { "type": "keyword" }, "certificate": { "type": "keyword" } } },
+                    "993": { "properties": { "state": { "type": "keyword" }, "tls": { "type": "keyword" }, "certificate": { "type": "keyword" } } },
+                    "995": { "properties": { "state": { "type": "keyword" }, "tls": { "type": "keyword" }, "certificate": { "type": "keyword" } } },
                     "3389": { "properties": { "state": { "type": "keyword" }, "tls": { "type": "keyword" } } },
-                    "8080": { "properties": { "state": { "type": "keyword" }, "tls": { "type": "keyword" } } },
-                    "8443": { "properties": { "state": { "type": "keyword" }, "tls": { "type": "keyword" } } }
+                    "8080": { "properties": { "state": { "type": "keyword" }, "tls": { "type": "keyword" }, "certificate": { "type": "keyword" } } },
+                    "8443": { "properties": { "state": { "type": "keyword" }, "tls": { "type": "keyword" }, "certificate": { "type": "keyword" } } }
                   }
                 },
                 "open_ports": { "type": "integer" },

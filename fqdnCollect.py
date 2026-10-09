@@ -16,7 +16,7 @@ import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import quote, urlsplit
 
@@ -46,6 +46,11 @@ DEFAULT_WILDCARD_SAMPLES = 2
 DEFAULT_MAX_PAGES = 1000
 DEFAULT_CERTSPOTTER_MAX_WAIT = 1800
 CERTSPOTTER_STATE_FILE = 'certspotter.json'
+SHODAN_DNS_STATE_FILE = 'shodan-dns.json'
+# Mémoire glissante de Shodan DNS : un nom reste connu tant qu’il a été vu depuis
+# moins de SHODAN_DNS_CACHE_DAYS jours, et le cache d’un domaine actualisé depuis
+# moins longtemps remplace une collecte que les crédits ne permettent pas.
+SHODAN_DNS_CACHE_DAYS = 60
 DEFAULT_SUBFINDER_PATH = shutil.which('subfinder')
 DEFAULT_AMASS_PATH = shutil.which('amass')
 DEFAULT_DNSX_PATH = shutil.which('dnsx')
@@ -384,6 +389,15 @@ def shodanErrorMessage(response):
 
 
 class ShodanDnsCollector(Collector):
+	"""Collecte Shodan DNS avec un budget de crédits et une mémoire glissante.
+
+	Chaque page de /dns/domain coûte un crédit de requête mensuel. Les domaines
+	sont actualisés du plus ancien au plus récent dans la limite des crédits ;
+	les autres sont servis par l’état persistant (stateFile), valable
+	cacheDays jours. Chaque actualisation ne modifie que ce qui a changé : noms
+	nouveaux, date de dernière observation, preuves différentes ; un nom non revu
+	depuis cacheDays jours est oublié.
+	"""
 	name = 'shodan-dns'
 
 	def __init__(
@@ -393,21 +407,78 @@ class ShodanDnsCollector(Collector):
 		timeout=DEFAULT_SOURCE_TIMEOUT,
 		history=False,
 		maxPages=DEFAULT_MAX_PAGES,
+		stateFile=None,
+		cacheDays=SHODAN_DNS_CACHE_DAYS,
+		clock=None,
 	):
 		self.apiKey = apiKey
 		self.session = createHttpSession() if session is None else session
 		self.timeout = min(timeout, 60)
 		self.history = history
 		self.maxPages = maxPages
+		self.stateFile = Path(stateFile) if stateFile else None
+		self.cacheDays = cacheDays
+		self.clock = clock or (lambda: datetime.now(timezone.utc))
 		self.lock = threading.Lock()
+		self.stateLock = threading.Lock()
+		self.state = None
 		self.credits = None
 		self.creditLimit = None
 		self.quotas = None
 		self.surplus = 0
 
+	def loadState(self):
+		with self.stateLock:
+			if self.state is not None:
+				return
+			state = {}
+			if self.stateFile is not None:
+				try:
+					state = readJson(self.stateFile, default={})
+				except (OSError, ValueError) as error:
+					print(
+						f'[avertissement] shodan-dns: état illisible, cache ignoré ({error})',
+						file=sys.stderr,
+					)
+					state = {}
+			if not isinstance(state, dict) or not isinstance(state.get('domains'), dict):
+				state = {'version': 1, 'domains': {}}
+			self.state = state
+
+	def saveState(self):
+		if self.stateFile is None:
+			return
+		with self.stateLock:
+			self.stateFile.parent.mkdir(parents=True, exist_ok=True)
+			atomicWriteJson(self.stateFile, self.state)
+
+	def domainEntry(self, domain):
+		with self.stateLock:
+			entry = self.state['domains'].setdefault(domain, {})
+			if not isinstance(entry.get('names'), dict):
+				entry['names'] = {}
+			entry.setdefault('refreshed_at', None)
+			entry.setdefault('pages', None)
+			return(entry)
+
+	def cutoff(self):
+		return((self.clock() - timedelta(days=self.cacheDays)).isoformat())
+
+	def cacheValid(self, domain):
+		refreshedAt = self.domainEntry(domain).get('refreshed_at')
+		return(isinstance(refreshedAt, str) and refreshedAt >= self.cutoff())
+
+	def refreshOrder(self, domain):
+		"""Le domaine actualisé le moins récemment passe en premier."""
+		refreshedAt = self.domainEntry(domain).get('refreshed_at')
+		return((refreshedAt if isinstance(refreshedAt, str) else '', domain))
+
 	def prepare(self, domains):
-		# Chaque page de /dns/domain consomme un crédit de requête mensuel :
-		# les crédits restants sont répartis équitablement entre les domaines.
+		# Les crédits vont d’abord aux domaines dont le cache est le plus ancien :
+		# chacun reçoit le nombre de pages de sa dernière actualisation complète,
+		# ou à défaut une part égale des crédits restants (les domaines collectés
+		# en parallèle ne doivent pas en être privés) ; le reliquat reste commun.
+		self.loadState()
 		if not self.apiKey or not domains:
 			return
 		try:
@@ -436,23 +507,30 @@ class ShodanDnsCollector(Collector):
 		if isinstance(usageLimits, dict):
 			self.creditLimit = usageLimits.get('query_credits')
 		self.credits = credits
-		orderedDomains = sorted(set(domains))
-		share, remainder = divmod(credits, len(orderedDomains))
-		self.quotas = {
-			domain: share + (1 if index < remainder else 0)
-			for index, domain in enumerate(orderedDomains)
-		}
-		self.surplus = 0
+		remaining = credits
+		self.quotas = {}
+		ordered = sorted(set(domains), key=self.refreshOrder)
+		for index, domain in enumerate(ordered):
+			pages = self.domainEntry(domain).get('pages')
+			if isinstance(pages, int) and not isinstance(pages, bool) and pages > 0:
+				quota = min(pages, remaining)
+			else:
+				quota = -(-remaining // (len(ordered) - index))
+			self.quotas[domain] = quota
+			remaining -= quota
+		self.surplus = remaining
+		refreshed = sum(quota > 0 for quota in self.quotas.values())
 		print(
-			f'[info] shodan-dns: {credits} crédit(s) de requête disponible(s) pour '
-			f'{len(orderedDomains)} domaine(s)',
+			f'[info] shodan-dns: {credits} crédit(s) de requête disponible(s) ; '
+			f'{refreshed} domaine(s) actualisé(s) par ancienneté, '
+			f'{len(self.quotas) - refreshed} servi(s) par le cache',
 			file=sys.stderr,
 		)
 
 	def availability(self):
 		if not self.apiKey:
 			return(False, 'variable SHODAN_API_KEY absente')
-		if self.credits == 0:
+		if self.credits == 0 and not any(self.cacheValid(domain) for domain in list(self.state['domains'])):
 			limit = f'/{self.creditLimit}' if self.creditLimit is not None else ''
 			return(
 				False,
@@ -491,20 +569,71 @@ class ShodanDnsCollector(Collector):
 		return(f'{subdomain}.{domain}')
 
 	def collect(self, domain):
+		self.loadState()
 		try:
-			return(self.collectPages(domain))
+			findings, pages, complete, failure = self.collectPages(domain)
 		finally:
 			self.releaseCredits(domain)
+		known = self.updateCache(domain, findings, pages, complete)
+		if failure:
+			if not known:
+				raise RuntimeError(failure)
+			raise IncompleteCollectionError(failure, known)
+		if complete:
+			return(known)
+		entry = self.domainEntry(domain)
+		if self.cacheValid(domain):
+			print(
+				f'[info] shodan-dns ({domain}): {len(known)} nom(s) servi(s) par le cache '
+				f'actualisé le {entry["refreshed_at"][:10]} ({pages} page(s) lue(s) ce run)',
+				file=sys.stderr,
+			)
+			return(known)
+		raise IncompleteCollectionError(
+			f'budget de crédits Shodan épuisé après {pages} page(s), '
+			f'aucun cache de moins de {self.cacheDays} jours',
+			known,
+		)
+
+	def updateCache(self, domain, findings, pages, complete):
+		"""Fusionne les noms observés dans l’état, oublie ceux non revus depuis
+		cacheDays jours et renvoie tous les noms connus sous forme de Finding."""
+		entry = self.domainEntry(domain)
+		observedAt = self.clock().isoformat()
+		cutoff = self.cutoff()
+		observed = {}
+		for finding in findings:
+			evidence = observed.setdefault(finding.name, [])
+			if finding.evidence and finding.evidence not in evidence:
+				evidence.append(finding.evidence)
+		with self.stateLock:
+			names = entry['names']
+			for name, evidence in observed.items():
+				item = names.setdefault(name, {})
+				item['last_seen'] = observedAt
+				if evidence != item.get('evidence', []):
+					item['evidence'] = evidence
+			for name in [name for name, item in names.items() if str(item.get('last_seen', '')) < cutoff]:
+				del names[name]
+			if complete:
+				entry['refreshed_at'] = observedAt
+				entry['pages'] = max(pages, 1)
+			snapshot = {name: list(item.get('evidence') or [{}]) for name, item in names.items()}
+		if findings or complete:
+			self.saveState()
+		known = []
+		for name in sorted(snapshot):
+			for evidence in snapshot[name]:
+				appendFinding(known, name, domain, self.name, evidence=evidence or None)
+		return(known)
 
 	def collectPages(self, domain):
+		"""Renvoie (noms, pages lues, collecte complète, motif d’échec éventuel)."""
 		findings = []
 		url = SHODAN_DNS_URL.format(domain=quote(domain, safe=''))
 		for page in range(1, self.maxPages + 1):
 			if not self.reserveCredit(domain):
-				raise IncompleteCollectionError(
-					f'budget de crédits Shodan épuisé après {page - 1} page(s)',
-					findings,
-				)
+				return(findings, page - 1, False, None)
 			response = self.session.get(
 				url,
 				params={
@@ -516,11 +645,11 @@ class ShodanDnsCollector(Collector):
 			)
 			try:
 				response.raise_for_status()
-			except requests.HTTPError as error:
-				message = f'page {page} refusée par Shodan ({shodanErrorMessage(response)})'
-				if findings:
-					raise IncompleteCollectionError(message, findings) from error
-				raise RuntimeError(message) from error
+			except requests.HTTPError:
+				return(
+					findings, page - 1, False,
+					f'page {page} refusée par Shodan ({shodanErrorMessage(response)})',
+				)
 			payload = response.json()
 			if not isinstance(payload, dict):
 				raise ValueError('Réponse Shodan DNS invalide')
@@ -542,13 +671,12 @@ class ShodanDnsCollector(Collector):
 				appendFinding(findings, name, domain, self.name)
 
 			if not payload.get('more'):
-				break
-		else:
-			print(
-				f'[avertissement] shodan-dns: limite de {self.maxPages} pages atteinte pour {domain}',
-				file=sys.stderr,
-			)
-		return(findings)
+				return(findings, page, True, None)
+		print(
+			f'[avertissement] shodan-dns: limite de {self.maxPages} pages atteinte pour {domain}',
+			file=sys.stderr,
+		)
+		return(findings, self.maxPages, True, None)
 
 
 def parseRetryAfter(response, default=60):
@@ -1492,6 +1620,7 @@ def buildCollectors(
 				timeout=sourceTimeout,
 				history=shodanHistory,
 				maxPages=maxPages,
+				stateFile=Path(stateDir) / SHODAN_DNS_STATE_FILE,
 			))
 		elif sourceName == 'certspotter':
 			collectors.append(CertSpotterCollector(

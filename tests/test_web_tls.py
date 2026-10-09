@@ -855,6 +855,142 @@ def testTestTLSChecksChainAndHostname(monkeypatch):
 	assert result['chain_valid'] is True
 
 
+@pytest.mark.parametrize('output, cause', [
+	(b'CONNECTED(00000003)\nerror:0A000458:SSL routines::tlsv1 unrecognized name:SSL alert number 112\n', 'unrecognized_name'),
+	(b'CONNECTED(00000003)\nssl/tls alert handshake failure:SSL alert number 40\n', 'alert:40'),
+	(b'write:errno=104\n', 'reset'),
+	(b'connect:errno=111\n', 'refused'),
+	(b'CONNECTED(00000003)\nunexpected eof while reading\n', 'eof'),
+	(b'CONNECTED(00000003)\n', 'no_certificate'),
+])
+def testClassifyTlsFailure(output, cause):
+	assert webTLS.classifyTlsFailure(output.decode()) == cause
+
+
+def testTestTLSRetriesTransientFailureOnce(monkeypatch):
+	privateKey = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+	outputs = [b'write:errno=104\n', buildCertificate(privateKey) + b'\nVerify return code: 0 (ok)\n']
+	sleeps = []
+	monkeypatch.setattr(webTLS.subprocess, 'run', lambda command, **kwargs: SimpleNamespace(stdout=outputs.pop(0)))
+	monkeypatch.setattr(webTLS.time, 'sleep', sleeps.append)
+
+	result = webTLS.testTLS('192.0.2.1', 'www.example.com')
+
+	assert result['chain_valid'] is True
+	assert 'tls_failure' not in result
+	assert sleeps == [webTLS.TLS_RETRY_DELAY]
+
+
+def testTestTLSDoesNotRetryRefusedName(monkeypatch):
+	calls = []
+
+	def fakeRun(command, **kwargs):
+		calls.append(command)
+		return(SimpleNamespace(stdout=b'tlsv1 unrecognized name:SSL alert number 112\n'))
+
+	monkeypatch.setattr(webTLS.subprocess, 'run', fakeRun)
+	monkeypatch.setattr(webTLS.time, 'sleep', lambda seconds: pytest.fail('nouvelle tentative inattendue'))
+
+	assert webTLS.testTLS('192.0.2.1', 'www.example.com') == {'tls_failure': 'unrecognized_name'}
+	assert len(calls) == 1
+
+
+def testTestTLSReportsPersistentFailure(monkeypatch):
+	monkeypatch.setattr(webTLS.subprocess, 'run', lambda command, **kwargs: SimpleNamespace(stdout=b'write:errno=104\n'))
+	monkeypatch.setattr(webTLS.time, 'sleep', lambda seconds: None)
+
+	assert webTLS.testTLS('192.0.2.1', 'www.example.com') == {'tls_failure': 'reset'}
+
+
+@pytest.mark.parametrize('verify, expected', [
+	(b'Verify return code: 0 (ok)', 'expiring'),
+	(b'Verify return code: 62 (hostname mismatch)', 'other_name'),
+	(b'Verify return code: 21 (unable to verify the first certificate)', 'untrusted'),
+])
+def testPortProbeReadsCertificateWithSni(monkeypatch, verify, expected):
+	privateKey = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+	issuerKey = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+	issuer = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, 'Example CA')])
+	certificate = buildCertificate(privateKey, issuerName=issuer, issuerMaterial=issuerKey)
+	captured = {}
+
+	def fakeRun(command, **kwargs):
+		captured['command'] = command
+		return(SimpleNamespace(stdout=(
+			b'CONNECTED(00000003)\n' + certificate
+			+ b'\nNew, TLSv1.3, Cipher is TLS_AES_256_GCM_SHA384\n' + verify + b'\n'
+		)))
+
+	monkeypatch.setattr(webTLS.subprocess, 'run', fakeRun)
+	item = {'port993': 'open', 'port443': 'open', 'certificate_sha256': 'a' * 64}
+
+	result = webTLS.analysePortEncryption(item, '192.0.2.1', 'mail.example.com')
+
+	command = captured['command']
+	assert command[command.index('-servername') + 1] == 'mail.example.com'
+	assert command[command.index('-verify_hostname') + 1] == 'mail.example.com'
+	assert result['tls_port993'] == 'tls'
+	assert result['tls_port443'] == 'tls'
+	assert result['cert_port993'] == expected
+	assert 28 <= result['cert_days_port993'] <= 30
+	assert 'cert_port443' not in result
+
+
+def testExpiredPortCertificateIsClassified():
+	assert webTLS.classifyPortCertificate({'has_expired': True, 'verify_message': 'certificate has expired'}) == 'expired'
+	assert webTLS.classifyPortCertificate({'remain': 200, 'chain_valid': True, 'verify_message': 'ok'}) == 'valid'
+
+
+def failedTlsItem(host, failure, **overrides):
+	item = {
+		'host': host, 'ip': '192.0.2.1', 'port443': 'open', 'tls_failure': failure,
+		'scan_status': 'success', 'scan_duration_seconds': 9.0, 'tls_port443': None,
+	}
+	item.update(overrides)
+	return(item)
+
+
+def testSecondPassRecoversTransientTlsFailures(monkeypatch):
+	completed = {
+		'a': failedTlsItem('a.example.com', 'timeout'),
+		'b': failedTlsItem('b.example.com', 'reset'),
+		'c': failedTlsItem('c.example.com', 'unrecognized_name'),
+		'd': failedTlsItem('d.example.com', 'alert:40'),
+		'e': failedTlsItem('e.example.com', 'timeout', tls_second_pass=True),
+	}
+	analysed = []
+	sleeps = []
+
+	def fakeAnalyse(item, *args):
+		analysed.append(item)
+		if item['host'] == 'a.example.com':
+			return({**item, 'certificate_sha256': 'f' * 64, 'scan_status': 'success'})
+		return({**item, 'tls_failure': 'timeout', 'scan_status': 'success'})
+
+	monkeypatch.setattr(webTLS, 'analyseEndpoint', fakeAnalyse)
+	monkeypatch.setattr(webTLS.time, 'sleep', sleeps.append)
+
+	recovered = webTLS.retryTlsFailures(completed)
+
+	assert recovered == 1
+	assert sleeps == [webTLS.TLS_SECOND_PASS_DELAY]
+	assert sorted(item['host'] for item in analysed) == ['a.example.com', 'b.example.com']
+	assert all('tls_failure' not in item and 'scan_status' not in item for item in analysed)
+	assert completed['a']['certificate_sha256'] == 'f' * 64
+	assert completed['a']['tls_second_pass'] is True
+	assert completed['b']['tls_failure'] == 'timeout'
+	assert completed['b']['scan_duration_seconds'] == 9.0
+	assert completed['b']['tls_second_pass'] is True
+	assert 'tls_second_pass' not in completed['c']
+	assert 'tls_second_pass' not in completed['d']
+
+
+def testSecondPassDoesNothingWithoutTransientFailure(monkeypatch):
+	monkeypatch.setattr(webTLS.time, 'sleep', lambda seconds: pytest.fail('attente inattendue'))
+
+	assert webTLS.retryTlsFailures({'a': failedTlsItem('a.example.com', 'unrecognized_name')}) == 0
+
+
 def testAllCipherSuitesWaitsForEveryResult(monkeypatch):
 	webTLS.cipherList = [
 		{'name': f'CIPHER-{index}', 'protocol': 'TLSv1.2'}

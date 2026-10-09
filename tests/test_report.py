@@ -52,6 +52,7 @@ def exposureEvent(name, change='unchanged', grade='A', **tls):
 			'open_ports': [80, 443, 8080],
 			'cleartext_ports': [],
 			'services': ['80:clear', '443:tls', '8080:redirect'],
+			'port': {'993': {'state': ['open'], 'tls': ['tls'], 'certificate': ['other_name']}},
 			'dns': {'caa': {'status': 'absent'}},
 			'tls': {'grade': grade, 'findings': [], **tls},
 		}},
@@ -139,6 +140,8 @@ def testHtmlReportIsSelfContained():
 	assert report.count('<svg class="chart"') >= 5
 	assert '<span class="badge g-m">M</span>' in report
 	assert 'Désactiver les suites à blocs de 64 bits' in report
+	assert 'Certificats des autres ports' in report
+	assert '| 993 |' not in report and '<td class="num">2</td></tr>' in report
 
 
 def testHtmlReportEscapesObservedValues():

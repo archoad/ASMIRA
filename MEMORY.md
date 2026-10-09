@@ -223,9 +223,15 @@ confirmé fonctionnel le 3 août 2026 avec 100 endpoints.
   compatibles lors des futures mises à jour.
 - Shodan DNS (`/dns/domain`) consomme un crédit de requête par page ; le plan
   `dev` en fournit 100 par mois. Le collecteur interroge `/api-info` avant la
-  collecte, répartit les crédits restants entre les domaines, réutilise ceux
-  laissés par les domaines terminés, et marque la source en échec (run
-  `partial`) lorsque le budget est épuisé, en conservant les pages obtenues.
+  collecte et actualise les domaines par ancienneté de leur dernière
+  actualisation complète (pages de cette actualisation, part égale pour un
+  domaine jamais actualisé), en réutilisant les crédits laissés par les
+  domaines terminés. `state/shodan-dns.json` est une mémoire glissante de
+  60 jours : seul ce qui a changé y est modifié, un nom non revu depuis 60 jours
+  est oublié, et un domaine non actualisé faute de crédits est servi par son
+  cache s’il date de moins de 60 jours, sans rendre le run partiel. Sans cache
+  valable, la source est en échec (run `partial`) avec les pages obtenues ; une
+  erreur Shodan la fait toujours échouer, noms du cache conservés.
   `shodan_history` vaut `false` par défaut pour limiter le nombre de pages.
 - Cert Spotter est utilisé sans clé (quota non authentifié d’une dizaine de
   requêtes, porté par l’IP de `srv`). Le collecteur est incrémental : il
@@ -503,3 +509,33 @@ Points techniques retenus :
   3 octobre, l’e-mail est un court résumé texte et le bilan détaillé un fichier
   HTML autonome joint (`<run-id>_report.html` : CSS et graphiques SVG intégrés,
   aucun script ni ressource externe, CSP `default-src 'none'`).
+- **2026-10-03 — Mémoire glissante Shodan DNS.** Un run consomme environ
+  26 crédits pour 100 par mois : le dernier run du mois manquait de crédits et
+  devenait partiel. Décision : cache `state/shodan-dns.json` de 60 jours
+  glissants (pour ne pas tout recommencer chaque mois et ne modifier que ce qui
+  a évolué) et actualisation des domaines par ancienneté.
+- **2026-10-05 — SNI, certificats par port, modèle v3.** Un testeur a rappelé
+  que le certificat dépend du couple IP:port et du SNI. ASMIRA passait déjà le
+  FQDN en SNI partout, mais ne lisait le certificat que sur 443 et traitait un
+  refus de nom comme un échec. Mesure sur les 67 `TLS_HANDSHAKE_FAILED` du run
+  du 2 octobre : 32 répondaient normalement le lendemain (échecs passagers),
+  13 refusaient le nom (alerte 112), 5 alerte 40, 10 fermeture, 4
+  réinitialisation, 3 délai. Décisions : `testTLS` retente une fois un échec
+  passager et enregistre la cause (`tls_failure`) ; un refus explicite du nom
+  sur 443 n’est plus noté et donne `TLS_NAME_NOT_SERVED` (information),
+  `GRADE_VERSION` = 3 ; le certificat de 25, 465, 587, 993, 995, 8080 et 8443
+  est lu pour le FQDN (`asmira.exposure.port.<p>.certificate`), avec
+  `PORT_CERT_EXPIRED`, `PORT_CERT_UNTRUSTED`, `PORT_CERT_EXPIRES_30D` (élevés)
+  et `PORT_NAME_NOT_SERVED` (information, certificat d’un autre nom : port
+  ouvert sur l’adresse partagée mais non servi pour ce nom) ; le texte de
+  `CERT_HOSTNAME_MISMATCH` propose aussi de corriger le DNS. 31 codes de
+  constat.
+- **2026-10-06 — Run du 5 octobre, seconde passe TLS.** Premier run v3, à
+  21 domaines : 6 h 22, 2 765 FQDN. 64 couples échouaient encore sur 443 par
+  délai dépassé malgré la seconde tentative, surtout chez `cnp.fr`, alors qu’ils
+  répondaient normalement le lendemain. Décision : une seconde passe en fin de
+  cartographie (`retryTlsFailures`), après 60 s et avec deux analyses
+  simultanées, sur les couples en échec passager. Le journal ne liste plus
+  chaque couple FQDN/IP lors de la construction de la liste des IP (environ
+  4 600 lignes par run) et ignore les `CryptographyDeprecationWarning` des
+  certificats observés.

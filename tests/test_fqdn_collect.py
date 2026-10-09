@@ -1,5 +1,6 @@
 import json
 import subprocess
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -394,6 +395,211 @@ def testShodanDnsReusesCreditsLeftByFinishedDomains():
 	findings = collector.collect('example.net')
 
 	assert {item.name for item in findings} == {'a.example.net', 'b.example.net', 'c.example.net'}
+
+
+SHODAN_NOW = datetime(2026, 10, 5, 18, 0, tzinfo=timezone.utc)
+
+
+def shodanCacheCollector(tmp_path, session, now=SHODAN_NOW):
+	return(fqdnCollect.ShodanDnsCollector(
+		apiKey='test-key',
+		session=session,
+		stateFile=tmp_path / 'shodan-dns.json',
+		clock=lambda: now,
+	))
+
+
+def writeShodanState(tmp_path, domains):
+	(tmp_path / 'shodan-dns.json').write_text(json.dumps({'version': 1, 'domains': domains}))
+
+
+def shodanState(tmp_path):
+	return(json.loads((tmp_path / 'shodan-dns.json').read_text())['domains'])
+
+
+def testShodanDnsCompleteRefreshIsRemembered(tmp_path):
+	session = QueueSession([
+		shodanApiInfo(5),
+		FakeResponse({
+			'data': [{'subdomain': 'api', 'type': 'A', 'value': '192.0.2.10', 'last_seen': None, 'ttl': 300}],
+			'subdomains': ['api'],
+			'more': True,
+		}),
+		FakeResponse({'data': [], 'subdomains': ['shop'], 'more': False}),
+	])
+	collector = shodanCacheCollector(tmp_path, session)
+	collector.prepare(['example.com'])
+
+	findings, report = fqdnCollect.runCollector(collector, 'example.com')
+
+	assert report['status'] == 'success'
+	assert {item.name for item in findings} == {'api.example.com', 'shop.example.com'}
+	entry = shodanState(tmp_path)['example.com']
+	assert entry['refreshed_at'] == SHODAN_NOW.isoformat()
+	assert entry['pages'] == 2
+	assert entry['names']['api.example.com']['evidence'] == [
+		{'record_type': 'A', 'value': '192.0.2.10', 'last_seen': None, 'ttl': 300},
+	]
+	assert entry['names']['shop.example.com']['last_seen'] == SHODAN_NOW.isoformat()
+
+
+def testShodanDnsServesRecentCacheWhenCreditsRunOut(tmp_path):
+	writeShodanState(tmp_path, {'example.com': {
+		'refreshed_at': (SHODAN_NOW - timedelta(days=20)).isoformat(),
+		'pages': 3,
+		'names': {'old.example.com': {'last_seen': (SHODAN_NOW - timedelta(days=20)).isoformat()}},
+	}})
+	session = QueueSession([
+		shodanApiInfo(1),
+		FakeResponse({'data': [], 'subdomains': ['new'], 'more': True}),
+	])
+	collector = shodanCacheCollector(tmp_path, session)
+	collector.prepare(['example.com'])
+
+	findings, report = fqdnCollect.runCollector(collector, 'example.com')
+
+	assert report['status'] == 'success'
+	assert {item.name for item in findings} == {'new.example.com', 'old.example.com'}
+	entry = shodanState(tmp_path)['example.com']
+	assert entry['refreshed_at'] == (SHODAN_NOW - timedelta(days=20)).isoformat()
+	assert entry['names']['new.example.com']['last_seen'] == SHODAN_NOW.isoformat()
+
+
+def testShodanDnsCacheWithoutCreditsMakesNoRequest(tmp_path):
+	writeShodanState(tmp_path, {'example.com': {
+		'refreshed_at': (SHODAN_NOW - timedelta(days=5)).isoformat(),
+		'pages': 1,
+		'names': {'api.example.com': {'last_seen': (SHODAN_NOW - timedelta(days=5)).isoformat()}},
+	}})
+	session = QueueSession([shodanApiInfo(0)])
+	collector = shodanCacheCollector(tmp_path, session)
+	collector.prepare(['example.com'])
+
+	findings, report = fqdnCollect.runCollector(collector, 'example.com')
+
+	assert report['status'] == 'success'
+	assert [item.name for item in findings] == ['api.example.com']
+	assert [call[0] for call in session.calls] == [fqdnCollect.SHODAN_API_INFO_URL]
+
+
+def testShodanDnsExpiredCacheStillFailsTheSource(tmp_path):
+	writeShodanState(tmp_path, {'example.com': {
+		'refreshed_at': (SHODAN_NOW - timedelta(days=61)).isoformat(),
+		'pages': 1,
+		'names': {'api.example.com': {'last_seen': (SHODAN_NOW - timedelta(days=59)).isoformat()}},
+	}})
+	session = QueueSession([shodanApiInfo(0)])
+	collector = shodanCacheCollector(tmp_path, session)
+	collector.prepare(['example.com'])
+
+	findings, report = fqdnCollect.runCollector(collector, 'example.com')
+
+	assert report['status'] == 'skipped'
+	assert 'épuisés (0/100)' in report['error']
+
+
+def testShodanDnsWithoutRecentCacheReportsExhaustedBudget(tmp_path):
+	writeShodanState(tmp_path, {
+		'example.com': {'refreshed_at': (SHODAN_NOW - timedelta(days=70)).isoformat(), 'pages': 2, 'names': {}},
+		'example.net': {'refreshed_at': (SHODAN_NOW - timedelta(days=1)).isoformat(), 'pages': 1, 'names': {}},
+	})
+	session = QueueSession([shodanApiInfo(1)])
+	collector = shodanCacheCollector(tmp_path, session)
+	collector.prepare(['example.com', 'example.net'])
+	collector.quotas['example.com'] = 0
+
+	findings, report = fqdnCollect.runCollector(collector, 'example.com')
+
+	assert report['status'] == 'failed'
+	assert 'aucun cache de moins de 60 jours' in report['error']
+
+
+def testShodanDnsForgetsNamesNotSeenForSixtyDays(tmp_path):
+	writeShodanState(tmp_path, {'example.com': {
+		'refreshed_at': (SHODAN_NOW - timedelta(days=7)).isoformat(),
+		'pages': 1,
+		'names': {
+			'recent.example.com': {'last_seen': (SHODAN_NOW - timedelta(days=59)).isoformat()},
+			'stale.example.com': {'last_seen': (SHODAN_NOW - timedelta(days=61)).isoformat()},
+		},
+	}})
+	session = QueueSession([
+		shodanApiInfo(5),
+		FakeResponse({'data': [], 'subdomains': ['api'], 'more': False}),
+	])
+	collector = shodanCacheCollector(tmp_path, session)
+	collector.prepare(['example.com'])
+
+	findings = collector.collect('example.com')
+
+	assert {item.name for item in findings} == {'api.example.com', 'recent.example.com'}
+	assert set(shodanState(tmp_path)['example.com']['names']) == {'api.example.com', 'recent.example.com'}
+
+
+def testShodanDnsOnlyChangesWhatEvolved(tmp_path):
+	evidence = {'record_type': 'A', 'value': '192.0.2.10', 'last_seen': None, 'ttl': 300}
+	writeShodanState(tmp_path, {'example.com': {
+		'refreshed_at': (SHODAN_NOW - timedelta(days=7)).isoformat(),
+		'pages': 1,
+		'names': {
+			'api.example.com': {'last_seen': (SHODAN_NOW - timedelta(days=7)).isoformat(), 'evidence': [evidence]},
+			'mail.example.com': {'last_seen': (SHODAN_NOW - timedelta(days=7)).isoformat()},
+		},
+	}})
+	session = QueueSession([
+		shodanApiInfo(5),
+		FakeResponse({
+			'data': [{'subdomain': 'api', 'type': 'A', 'value': '192.0.2.20', 'last_seen': None, 'ttl': 300}],
+			'subdomains': [],
+			'more': False,
+		}),
+	])
+	collector = shodanCacheCollector(tmp_path, session)
+	collector.prepare(['example.com'])
+
+	collector.collect('example.com')
+
+	names = shodanState(tmp_path)['example.com']['names']
+	assert names['api.example.com']['evidence'][0]['value'] == '192.0.2.20'
+	assert names['api.example.com']['last_seen'] == SHODAN_NOW.isoformat()
+	assert names['mail.example.com'] == {'last_seen': (SHODAN_NOW - timedelta(days=7)).isoformat()}
+
+
+def testShodanDnsRefreshesOldestDomainsFirst(tmp_path):
+	writeShodanState(tmp_path, {
+		'recent.example': {'refreshed_at': (SHODAN_NOW - timedelta(days=2)).isoformat(), 'pages': 3, 'names': {}},
+		'old.example': {'refreshed_at': (SHODAN_NOW - timedelta(days=30)).isoformat(), 'pages': 3, 'names': {}},
+		'middle.example': {'refreshed_at': (SHODAN_NOW - timedelta(days=9)).isoformat(), 'pages': 3, 'names': {}},
+	})
+	collector = shodanCacheCollector(tmp_path, QueueSession([shodanApiInfo(5)]))
+
+	collector.prepare(['recent.example', 'old.example', 'middle.example'])
+
+	assert collector.quotas == {'old.example': 3, 'middle.example': 2, 'recent.example': 0}
+
+
+def testShodanDnsHttpErrorKeepsCachedNamesButFails(tmp_path):
+	writeShodanState(tmp_path, {'example.com': {
+		'refreshed_at': (SHODAN_NOW - timedelta(days=7)).isoformat(),
+		'pages': 1,
+		'names': {'api.example.com': {'last_seen': (SHODAN_NOW - timedelta(days=7)).isoformat()}},
+	}})
+	session = QueueSession([
+		FakeResponse({'error': 'Invalid API key'}, error=requests.HTTPError('401'), statusCode=401),
+	])
+	collector = shodanCacheCollector(tmp_path, session)
+
+	findings, report = fqdnCollect.runCollector(collector, 'example.com')
+
+	assert report['status'] == 'failed'
+	assert [item.name for item in findings] == ['api.example.com']
+	assert 'Invalid API key' in report['error']
+
+
+def testShodanDnsStateLivesInStateDir(tmp_path):
+	collector = fqdnCollect.buildCollectors(['shodan-dns'], stateDir=tmp_path)[0]
+
+	assert collector.stateFile == tmp_path / fqdnCollect.SHODAN_DNS_STATE_FILE
 
 
 def testShodanDnsReportsShodanErrorMessage():
