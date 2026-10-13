@@ -959,14 +959,20 @@ def testSecondPassRecoversTransientTlsFailures(monkeypatch):
 		'e': failedTlsItem('e.example.com', 'timeout', tls_second_pass=True),
 	}
 	analysed = []
+	probed = []
 	sleeps = []
+
+	def fakeProbe(ip, host, commandSemaphore=None):
+		probed.append(host)
+		if host == 'a.example.com':
+			return({'certificate_sha256': 'f' * 64}, None)
+		return(None, 'timeout')
 
 	def fakeAnalyse(item, *args):
 		analysed.append(item)
-		if item['host'] == 'a.example.com':
-			return({**item, 'certificate_sha256': 'f' * 64, 'scan_status': 'success'})
-		return({**item, 'tls_failure': 'timeout', 'scan_status': 'success'})
+		return({**item, 'certificate_sha256': 'f' * 64, 'scan_status': 'success'})
 
+	monkeypatch.setattr(webTLS, 'runTlsProbe', fakeProbe)
 	monkeypatch.setattr(webTLS, 'analyseEndpoint', fakeAnalyse)
 	monkeypatch.setattr(webTLS.time, 'sleep', sleeps.append)
 
@@ -974,7 +980,8 @@ def testSecondPassRecoversTransientTlsFailures(monkeypatch):
 
 	assert recovered == 1
 	assert sleeps == [webTLS.TLS_SECOND_PASS_DELAY]
-	assert sorted(item['host'] for item in analysed) == ['a.example.com', 'b.example.com']
+	assert sorted(probed) == ['a.example.com', 'b.example.com']
+	assert [item['host'] for item in analysed] == ['a.example.com']
 	assert all('tls_failure' not in item and 'scan_status' not in item for item in analysed)
 	assert completed['a']['certificate_sha256'] == 'f' * 64
 	assert completed['a']['tls_second_pass'] is True

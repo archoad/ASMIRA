@@ -388,6 +388,15 @@ def shodanErrorMessage(response):
 	return(f'HTTP {statusCode}: {message}' if statusCode else message)
 
 
+def isShodanCreditsExhausted(response, message):
+	"""Refus de Shodan faute de crédits de requête (HTTP 401 dédié), à distinguer
+	d’une clé invalide ou d’une panne."""
+	return(
+		getattr(response, 'status_code', None) == 401
+		and 'insufficient query credits' in str(message).lower()
+	)
+
+
 class ShodanDnsCollector(Collector):
 	"""Collecte Shodan DNS avec un budget de crédits et une mémoire glissante.
 
@@ -426,6 +435,10 @@ class ShodanDnsCollector(Collector):
 		self.creditLimit = None
 		self.quotas = None
 		self.surplus = 0
+		self.creditRefusal = None
+		# Note par domaine reprise dans le rapport de collecte (et le bilan) :
+		# credit_refusal (Shodan a refusé faute de crédits) ou cache.
+		self.reportNotes = {}
 
 	def loadState(self):
 		with self.stateLock:
@@ -550,6 +563,16 @@ class ShodanDnsCollector(Collector):
 				return(True)
 			return(False)
 
+	def exhaustCredits(self, refusal=None):
+		with self.lock:
+			self.creditRefusal = refusal
+			self.credits = 0
+			self.surplus = 0
+			if self.quotas is not None:
+				self.quotas = {domain: 0 for domain in self.quotas}
+			else:
+				self.quotas = {}
+
 	def releaseCredits(self, domain):
 		if self.quotas is None:
 			return
@@ -583,15 +606,19 @@ class ShodanDnsCollector(Collector):
 			return(known)
 		entry = self.domainEntry(domain)
 		if self.cacheValid(domain):
+			self.reportNotes.setdefault(domain, 'cache')
 			print(
 				f'[info] shodan-dns ({domain}): {len(known)} nom(s) servi(s) par le cache '
 				f'actualisé le {entry["refreshed_at"][:10]} ({pages} page(s) lue(s) ce run)',
 				file=sys.stderr,
 			)
 			return(known)
+		reason = (
+			f'refus de Shodan faute de crédits ({self.creditRefusal})'
+			if self.creditRefusal else 'budget de crédits Shodan épuisé'
+		)
 		raise IncompleteCollectionError(
-			f'budget de crédits Shodan épuisé après {pages} page(s), '
-			f'aucun cache de moins de {self.cacheDays} jours',
+			f'{reason} après {pages} page(s), aucun cache de moins de {self.cacheDays} jours',
 			known,
 		)
 
@@ -646,9 +673,22 @@ class ShodanDnsCollector(Collector):
 			try:
 				response.raise_for_status()
 			except requests.HTTPError:
+				message = shodanErrorMessage(response)
+				if isShodanCreditsExhausted(response, message):
+					# /api-info peut annoncer un crédit de plus que Shodan n’en
+					# accepte, ou d’autres usages de la clé en consomment : ce
+					# refus est un budget épuisé, pas une panne (cache possible).
+					self.exhaustCredits(message)
+					self.reportNotes[domain] = 'credit_refusal'
+					print(
+						f'[info] shodan-dns ({domain}): Shodan refuse faute de crédits '
+						f'après {page - 1} page(s) ; budget remis à zéro',
+						file=sys.stderr,
+					)
+					return(findings, page - 1, False, None)
 				return(
 					findings, page - 1, False,
-					f'page {page} refusée par Shodan ({shodanErrorMessage(response)})',
+					f'page {page} refusée par Shodan ({message})',
 				)
 			payload = response.json()
 			if not isinstance(payload, dict):
@@ -1191,6 +1231,14 @@ class DnsxCollector(Collector):
 		return(findings)
 
 def runCollector(collector, domain):
+	findings, report = runCollectorOnce(collector, domain)
+	note = (getattr(collector, 'reportNotes', None) or {}).get(domain)
+	if note:
+		report['note'] = note
+	return(findings, report)
+
+
+def runCollectorOnce(collector, domain):
 	debugDisplay()
 	started = time.monotonic()
 	available, reason = collector.availability()

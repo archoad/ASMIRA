@@ -596,6 +596,55 @@ def testShodanDnsHttpErrorKeepsCachedNamesButFails(tmp_path):
 	assert 'Invalid API key' in report['error']
 
 
+def shodanCreditRefusal():
+	return(FakeResponse(
+		{'error': 'Insufficient query credits, please upgrade your API plan or wait for the monthly limit to reset'},
+		error=requests.HTTPError('401'),
+		statusCode=401,
+	))
+
+
+def testShodanDnsCreditRefusalServesValidCache(tmp_path):
+	writeShodanState(tmp_path, {
+		'example.com': {
+			'refreshed_at': (SHODAN_NOW - timedelta(days=7)).isoformat(),
+			'pages': 1,
+			'names': {'api.example.com': {'last_seen': (SHODAN_NOW - timedelta(days=7)).isoformat()}},
+		},
+		'example.net': {
+			'refreshed_at': (SHODAN_NOW - timedelta(days=3)).isoformat(),
+			'pages': 1,
+			'names': {'www.example.net': {'last_seen': (SHODAN_NOW - timedelta(days=3)).isoformat()}},
+		},
+	})
+	session = QueueSession([shodanApiInfo(2), shodanCreditRefusal()])
+	collector = shodanCacheCollector(tmp_path, session)
+	collector.prepare(['example.com', 'example.net'])
+
+	findings, report = fqdnCollect.runCollector(collector, 'example.com')
+	otherFindings, otherReport = fqdnCollect.runCollector(collector, 'example.net')
+
+	assert report['status'] == 'success'
+	assert [item.name for item in findings] == ['api.example.com']
+	assert otherReport['status'] == 'success'
+	assert [item.name for item in otherFindings] == ['www.example.net']
+	assert len(session.calls) == 2
+	assert collector.credits == 0
+	assert report['note'] == 'credit_refusal'
+	assert otherReport['note'] == 'cache'
+
+
+def testShodanDnsCreditRefusalWithoutCacheFails(tmp_path):
+	session = QueueSession([shodanApiInfo(1), shodanCreditRefusal()])
+	collector = shodanCacheCollector(tmp_path, session)
+	collector.prepare(['example.com'])
+
+	findings, report = fqdnCollect.runCollector(collector, 'example.com')
+
+	assert report['status'] == 'failed'
+	assert 'aucun cache de moins de 60 jours' in report['error']
+
+
 def testShodanDnsStateLivesInStateDir(tmp_path):
 	collector = fqdnCollect.buildCollectors(['shodan-dns'], stateDir=tmp_path)[0]
 

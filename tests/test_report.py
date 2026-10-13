@@ -117,6 +117,29 @@ def testAttentionPointsAreOrderedBySeverity():
 	assert 'Amass et dnsx ont trouvé 1 FQDN résolus' in texts
 
 
+def testShodanCreditRefusalIsAnAttentionPoint():
+	discovery = discoveryResult()
+	discovery['source_reports'] += [
+		{'domain': 'example.com', 'source': 'shodan-dns', 'status': 'success', 'count': 3,
+			'duration_seconds': 1, 'note': 'credit_refusal'},
+		{'domain': 'example.net', 'source': 'shodan-dns', 'status': 'success', 'count': 2,
+			'duration_seconds': 0, 'note': 'cache'},
+	]
+
+	result = analysis(discovery=discovery)
+	report = asmiraReport.renderHtml(result)
+
+	points = [(level, text) for level, text in result['attention'] if 'Shodan' in text]
+	assert points[0][0] == 'medium'
+	assert 'domaine example.com' in points[0][1]
+	assert '2 domaine(s) servi(s) par le cache' in points[0][1]
+	assert 'Shodan DNS : 2 domaine(s) servi(s) par le cache' in report
+
+
+def testNoShodanPointWithoutRefusal():
+	assert not [text for unused, text in analysis()['attention'] if 'Shodan' in text]
+
+
 def testSummaryIsShortPlainText():
 	summary = asmiraReport.renderSummary(analysis())
 

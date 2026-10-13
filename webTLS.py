@@ -1819,9 +1819,11 @@ def retryTlsFailures(
 	workers=None,
 ):
 	"""Seconde passe sur les couples dont le port 443 n’a donné aucun certificat
-	pour une cause passagère, une fois le balayage terminé. Un couple récupéré est
+	pour une cause passagère, une fois le balayage terminé. Une seule négociation
+	TLS est d’abord tentée (runTlsProbe) : un couple qui répond est alors
 	entièrement réanalysé ; sinon l’analyse initiale est conservée avec la
-	dernière cause. tls_second_pass évite de repasser après une reprise."""
+	dernière cause, sans relancer les sondes coûteuses (suites, PQC, ports).
+	tls_second_pass évite de repasser après une reprise."""
 	keys = [key for key, item in completedByKey.items() if needsTlsSecondPass(item)]
 	if not keys:
 		return(0)
@@ -1832,6 +1834,9 @@ def retryTlsFailures(
 
 	def retry(key):
 		previous = completedByKey[key]
+		data, failure = runTlsProbe(previous['ip'], previous['host'], commandSemaphore=commandSemaphore)
+		if not data:
+			return(key, {'tls_failure': failure})
 		base = {
 			name: value for name, value in previous.items()
 			if name not in ('tls_failure', 'scan_status', 'scan_error', 'scan_duration_seconds')

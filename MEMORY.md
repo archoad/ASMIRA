@@ -539,3 +539,15 @@ Points techniques retenus :
   chaque couple FQDN/IP lors de la construction de la liste des IP (environ
   4 600 lignes par run) et ignore les `CryptographyDeprecationWarning` des
   certificats observés.
+- **2026-10-13 — Seconde passe TLS allégée.** Au run du 12 octobre, la
+  seconde passe a récupéré 16 couples sur 77 (15 chez `cnp.fr`) mais coûté
+  1 h 32, car elle refaisait l’analyse complète de chaque couple. Elle tente
+  désormais une seule négociation TLS et ne refait l’analyse complète que si un
+  certificat revient. Après explication, un refus Shodan « Insufficient query
+  credits » (HTTP 401) est désormais traité comme un budget épuisé : le budget
+  est remis à zéro et le cache valable sert le domaine (`digiposte.fr` avait
+  fait échouer la source le 12 octobre malgré un cache du 5). Le refus reste
+  visible dans le journal et, à la demande de l’utilisateur, dans le bilan
+  HTML (point d’attention moyen et domaines servis par le cache, via la note
+  `credit_refusal`/`cache` du rapport de collecte) ; les autres erreurs Shodan
+  font toujours échouer la source.

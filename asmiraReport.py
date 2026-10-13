@@ -189,6 +189,15 @@ def analyseSources(discoveryResult):
 			for family in sorted(names, key=lambda family: (-uniqueResolved[family], -names[family], family))
 		],
 		'active_enabled': any(report.get('source') in ACTIVE_SOURCES for report in reports),
+		'shodan_cache': sorted(
+			report.get('domain') for report in reports
+			if report.get('source') == 'shodan-dns' and report.get('status') == 'success'
+			and report.get('note') in ('cache', 'credit_refusal')
+		),
+		'shodan_refusals': sorted(
+			report.get('domain') for report in reports
+			if report.get('source') == 'shodan-dns' and report.get('note') == 'credit_refusal'
+		),
 		'active_only': sorted(activeOnly),
 	})
 
@@ -391,6 +400,13 @@ def attentionPoints(analysis):
 			'sont à jour, mais aucune disparition n’est déclarée.',
 		))
 	sources = analysis['sources']
+	if sources['shodan_refusals']:
+		points.append((
+			'medium',
+			f'Shodan a refusé une requête faute de crédits (domaine {", ".join(sources["shodan_refusals"])}) : '
+			'les crédits mensuels sont épuisés plus tôt que prévu, peut-être par un autre usage de la clé. '
+			f'{fmt(len(sources["shodan_cache"]))} domaine(s) servi(s) par le cache Shodan DNS de moins de 60 jours.',
+		))
 	if sources['active_enabled'] and sources['active_only']:
 		points.append((
 			'info',
@@ -783,6 +799,11 @@ def renderSources(analysis, maxItems):
 			(report.get('domain'), report.get('source'), report.get('status'), fmt(report.get('count', 0)), report.get('error'))
 			for report in sources['failures']
 		], numeric=(3,)))
+	if sources['shodan_cache']:
+		parts.append(paragraph(
+			f'Shodan DNS : {fmt(len(sources["shodan_cache"]))} domaine(s) servi(s) par le cache de moins de '
+			f'60 jours, faute de crédits pour les actualiser ce run : {", ".join(sources["shodan_cache"])}.'
+		))
 	if sources['contribution']:
 		parts += [
 			Html('<h3>Apport de chaque source</h3>'),
