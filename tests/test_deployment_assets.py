@@ -52,7 +52,7 @@ def testElasticJsonAssetsAreValidAndDashboardIsGlobal():
 	assert fqdnTransform['dest']['index'] == 'asmira-fqdn-latest'
 	assert 'retention_policy' not in fqdnTransform
 	assert dashboard['title'] == '[archoad] Asmira — Surface d’exposition globale'
-	assert len(dashboard['panels']) == 50
+	assert len(dashboard['panels']) == 49
 	controls = dashboard['pinned_panels']
 	assert [control['config']['title'] for control in controls] == ['Domaine', 'FQDN']
 	assert [control['config']['field_name'] for control in controls] == [
@@ -79,7 +79,6 @@ def testElasticJsonAssetsAreValidAndDashboardIsGlobal():
 		'Statut PQC des certificats TLS par FQDN',
 		'Suites cryptographiques TLS négociées',
 		'Changements récents de certificat ou de statut PQC',
-		'Santé du dernier run',
 		'État DNS des candidats',
 		'Résolution DNS des candidats',
 		'Motifs wildcard conservés',
@@ -111,6 +110,8 @@ def testElasticJsonAssetsAreValidAndDashboardIsGlobal():
 		'Erreurs récentes de cartographie',
 		'État du port HTTPS',
 		'État des scans d’endpoints',
+		# Santé du run : portée par le bilan e-mail.
+		'Santé du dernier run',
 	} & {
 		panel['config'].get('title')
 		for panel in dashboard['panels']
@@ -120,7 +121,7 @@ def testElasticJsonAssetsAreValidAndDashboardIsGlobal():
 		for panel in dashboard['panels']
 		if panel['type'] == 'markdown'
 	]
-	assert len(markdownPanels) == 8
+	assert len(markdownPanels) == 7
 	markdownContent = '\n'.join(
 		panel['config']['content']
 		for panel in markdownPanels
@@ -131,7 +132,6 @@ def testElasticJsonAssetsAreValidAndDashboardIsGlobal():
 		'Certificats et ACME',
 		'Cryptographie et PQC',
 		'Surface d’exposition',
-		'Santé du pipeline',
 		'Découverte DNS',
 		'Graphe des domaines',
 	):
@@ -155,6 +155,10 @@ def testElasticJsonAssetsAreValidAndDashboardIsGlobal():
 	)
 	for fieldName in (
 		'certificate_sha256',
+		'certificate_chain_pqc_status',
+		'certificate_chain_pqc_algorithms',
+		'handshake_signature_type',
+		'handshake_signature_pqc_status',
 		'certificate_public_key_algorithm_oid',
 		'certificate_signature_algorithm_oid',
 		'certificate_pqc_algorithms',
@@ -183,6 +187,27 @@ def testElasticJsonAssetsAreValidAndDashboardIsGlobal():
 	assert 'asmira.exposure.tls.certificate_pqc_status' in pqcLayer['data_source']['query']
 	assert '"classical", "Classique' in pqcLayer['data_source']['query']
 	assert pqcLayer['breakdown_by'] == {'column': 'Statut post-quantique'}
+	pqcQuery = pqcLayer['data_source']['query']
+	# Statut le plus faible d’un FQDN à plusieurs adresses, pas l’ordre alphabétique.
+	assert 'MV_MIN(asmira.exposure.tls.certificate_pqc_status)' not in pqcQuery
+	assert 'hors recommandation ANSSI' in pqcQuery
+	pqcTable = next(
+		panel
+		for panel in dashboard['panels']
+		if panel['config'].get('title') == 'Bilan PQC des certificats par FQDN'
+	)
+	tableQuery = pqcTable['config']['data_source']['query']
+	assert tableQuery.startswith('FROM asmira-exposure-certificates-current ')
+	for fieldName in (
+		'certificate_chain_pqc_status',
+		'handshake_signature_type',
+		'pqc_hybrid_level',
+	):
+		assert f'asmira.exposure.tls.{fieldName}' in tableQuery
+	assert pqcTable['config']['metrics'] == [{'column': 'Adresses'}]
+	portMappings = mappings['asmira']['properties']['exposure']['properties']['port']['properties']
+	for port in ('25', '465', '587', '993', '995', '8080', '8443'):
+		assert portMappings[port]['properties']['certificate_pqc']['type'] == 'keyword'
 	cryptoPanel = next(
 		panel
 		for panel in dashboard['panels']
@@ -233,15 +258,6 @@ def testElasticJsonAssetsAreValidAndDashboardIsGlobal():
 	changeQuery = changePanel['config']['data_source']['query']
 	assert 'certificate_changed == true' in changeQuery
 	assert 'pqc_status_changed == true' in changeQuery
-	healthPanel = next(
-		panel
-		for panel in dashboard['panels']
-		if panel['config'].get('title') == 'Santé du dernier run'
-	)
-	assert healthPanel['config']['ignore_global_filters'] is True
-	assert 'SORT @timestamp DESC' in healthPanel['config']['data_source']['query']
-	assert 'asmira.run.counts.fqdns' in healthPanel['config']['data_source']['query']
-	assert healthPanel['config']['data_source']['query'].endswith('LIMIT 1')
 	historyPanel = next(
 		panel
 		for panel in dashboard['panels']

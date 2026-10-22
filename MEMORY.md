@@ -129,8 +129,9 @@ contient deux contrôles épinglés dans cet ordre : **Domaine** sur
 au choix du domaine de réduire les FQDN proposés.
 
 Le dashboard décrit l’exposition comme le meilleur état connu, car un run
-partiel conserve les FQDN antérieurs. Il affiche séparément la santé du
-dernier run, construit le volume historique depuis
+partiel conserve les FQDN antérieurs. La santé du dernier run en a été
+retirée le 22 octobre 2026 (rubrique « Santé du pipeline ») : le bilan e-mail
+la porte déjà. Le dashboard construit le volume historique depuis
 `asmira.run.counts.fqdns`, et nomme la répartition des changements selon la
 période réellement sélectionnée. Les panneaux de découverte DNS utilisent
 `asmira-discovery-latest` et ignorent explicitement les contrôles d’exposition,
@@ -143,7 +144,7 @@ TLS. Aucun domaine n’est écrit dans la spec ; l’API Dashboards ignorant Veg
 `elastic/setup.py` rattache le panneau au saved object après le PUT.
 Des panneaux Markdown précèdent chaque section majeure, les graphiques XY
 masquent leurs titres d’axes, et le panneau d’erreurs d’endpoints a été retiré
-au profit de la santé synthétique du run. À côté du statut PQC, le panneau
+(la santé du run passe par le bilan e-mail). À côté du statut PQC, le panneau
 **Suites cryptographiques TLS négociées** répartit
 `asmira.exposure.tls.negotiated_cipher`, c’est-à-dire la suite effectivement
 négociée lorsque la sonde a pu établir une session TLS, en barres horizontales
@@ -205,7 +206,8 @@ confirmé fonctionnel le 3 août 2026 avec 100 endpoints.
   versionnés.
 - Le dépôt GitHub public est `archoad/ASMIRA`, sa branche principale est `main`,
   sa licence est `GPL-3.0-only`. Les versions sont des tags (`v1.0.0`
-  depuis le 1er octobre 2026) dont GitHub fournit les archives source.
+  le 1er octobre 2026, `v1.1.0` le 22 octobre 2026), chacun publié en
+  release GitHub avec ses notes ; GitHub fournit les archives source.
 - `AGENTS.md` et `DEPLOYMENT.md` restent des documents locaux ignorés par Git ;
   ils ne sont pas publiés dans le dépôt GitHub.
 - Les bases GeoIP et le GeoJSON local ne sont pas versionnés.
@@ -563,3 +565,26 @@ Points techniques retenus :
   HTML (point d’attention moyen et domaines servis par le cache, via la note
   `credit_refusal`/`cache` du rapport de collecte) ; les autres erreurs Shodan
   font toujours échouer la source.
+- **2026-10-22 — Version 1.1.0.** Tag `v1.1.0` sur le commit « Dashboard add
+  graph by domain », publié en release GitHub (« Latest »). Notes : bilan de
+  run HTML et e-mail, source dnsx, Amass v4.2.0 seul, cache Shodan DNS, note
+  v3 et 31 codes de constat, preuves de chiffrement et redirection 8080,
+  seconde passe TLS, dashboard remanié avec le graphe des domaines. La mise à
+  jour impose `install.sh` puis `elastic/setup.py` avant le premier run. Un tag
+  seul ne crée pas de release : la publier avec `gh release create`.
+- **2026-10-22 — Bilan PQC des certificats (fiche ANSSI-FT-115).** L’ANSSI
+  vise l’hybridation de l’authentification : certificat, chaîne et signature du
+  handshake. Sans requête supplémentaire, la sonde classe désormais la chaîne
+  envoyée (`certificate_chain_pqc_status`), relève la signature du handshake
+  (`handshake_signature_type`, `handshake_signature_pqc_status`) et le statut PQC
+  du certificat des autres ports (`port.<p>.certificate_pqc`) ; la signature
+  n’est hybride (`pqc_hybrid_level`) que si feuille et chaîne le sont. Les PEM
+  (feuille, chaîne) restent dans `_hosts_analyse.json`, hors `raw.endpoints`,
+  pour reclasser l’historique si les OID évoluent. Le dashboard prend le statut
+  le plus faible par FQDN, signale ML-DSA seul comme hors recommandation et
+  ajoute la table « Bilan PQC des certificats par FQDN ». Correction au passage :
+  `cryptography` 46 lève `ValueError` sur une clé ML-DSA, ce qui aurait compté un
+  vrai certificat post-quantique en échec de handshake. Reste à faire, décidé
+  avec l’utilisateur : une sonde dédiée `-sigalgs mldsa…` pour détecter un second
+  certificat ML-DSA (OpenSSL 3.5 propose ML-DSA en dernier, un serveur à double
+  certificat sert donc le classique), plus tard ou en option.

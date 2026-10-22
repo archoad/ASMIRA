@@ -259,6 +259,49 @@ def classifyCertificatePqc(publicKeyOid, signatureOid):
 	return(status, algorithms)
 
 
+def classifyChainPem(chain):
+	"""Statut PQC des certificats d’autorité envoyés après la feuille : l’ANSSI
+	étend l’hybridation de l’authentification aux chaînes de certification."""
+	statuses = []
+	algorithms = []
+	for pem in chain:
+		try:
+			certificate = x509.load_pem_x509_certificate(pem.encode())
+			status, names = classifyCertificatePqc(
+				certificate.public_key_algorithm_oid.dotted_string,
+				certificate.signature_algorithm_oid.dotted_string,
+			)
+		except ValueError:
+			status, names = 'unknown', []
+		statuses.append(status)
+		algorithms.extend(name for name in names if name not in algorithms)
+	kinds = set(statuses)
+	if len(kinds) == 1:
+		chainStatus = statuses[0]
+	elif 'unknown' in kinds:
+		chainStatus = 'unknown'
+	else:
+		chainStatus = 'partial'
+	return({
+		'chain_pem': chain,
+		'chain_pqc_status': chainStatus,
+		'chain_pqc_algorithms': algorithms,
+	})
+
+
+def classifyHandshakeSignature(name):
+	"""Signature du handshake (CertificateVerify) d’après son nom TLS, par
+	exemple rsa_pss_rsae_sha256, ecdsa_secp256r1_sha256 ou mldsa65 : pqc pour
+	ML-DSA ou SLH-DSA seul, hybrid s’il est combiné à un algorithme classique."""
+	value = name.lower().replace('-', '').replace('_', '')
+	if not re.search(r'mldsa|slhdsa', value):
+		return('classical')
+	classicalPart = re.sub(r'mldsa|slhdsa', '', value)
+	if re.search(r'rsa|ecdsa|ed25519|ed448|brainpool', classicalPart):
+		return('hybrid')
+	return('pqc')
+
+
 def configureTools(netcat=None, nmap=None, openssl=None):
 	overrides = {
 		'netcat': netcat,
@@ -427,11 +470,21 @@ def extractTLSdata(data):
 	if isinstance(data, bytes):
 		data = data.decode(errors='replace')
 	regex = r"-----BEGIN CERTIFICATE-----.*?-----END CERTIFICATE-----"
-	sessionCertif = re.search(regex, data, re.DOTALL)
-	if (sessionCertif):
-		certData = extractCertificateData(sessionCertif.group())
-	else:
+	# Avec -showcerts, la feuille est suivie des certificats d’autorité envoyés
+	# par le serveur ; sans, seule la feuille est imprimée.
+	certificates = re.findall(regex, data, re.DOTALL)
+	if not certificates:
 		return(None)
+	certData = extractCertificateData(certificates[0])
+	# PEM conservés dans l’analyse du run (pas dans l’export Elastic) pour
+	# reclasser l’historique quand les tables d’OID évoluent.
+	certData['certificate_pem'] = certificates[0]
+	if certificates[1:]:
+		certData.update(classifyChainPem(certificates[1:]))
+	signatureMatch = re.search(r'^Peer signature type:\s*(\S+)', data, re.MULTILINE)
+	if signatureMatch:
+		certData['peer_signature_type'] = signatureMatch.group(1)
+		certData['peer_signature_pqc'] = classifyHandshakeSignature(signatureMatch.group(1))
 	verifyMatch = re.search(r'Verify return code:\s*(\d+)\s*\(([^)]*)\)', data)
 	if verifyMatch:
 		certData['chain_valid'] = verifyMatch.group(1) == '0'
@@ -558,7 +611,10 @@ def extractCertificateData(certPEM):
 		else:
 			result['public_key'] = 'Unknown'
 		result['key_size'] = getattr(publicKey, 'key_size', None)
-	except UnsupportedAlgorithm:
+	except (UnsupportedAlgorithm, ValueError):
+		# cryptography 46 lève ValueError (« Unknown key type ») sur une clé
+		# ML-DSA : sans ce repli, un certificat post-quantique ferait échouer
+		# toute la sonde TLS.
 		result['public_key'] = 'Unsupported'
 		result['key_size'] = None
 	subject = x509cert.subject
@@ -1672,6 +1728,7 @@ def analysePortEncryption(item, ip, host, commandSemaphore=None):
 		if port != 443 and certificate:
 			result[f'cert_port{port}'] = classifyPortCertificate(certificate)
 			result[f'cert_days_port{port}'] = certificate.get('remain')
+			result[f'cert_pqc_port{port}'] = certificate.get('pqc_status')
 	return(result)
 
 

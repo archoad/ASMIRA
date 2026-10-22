@@ -496,15 +496,44 @@ def testLegacyObservationWithSingleGroupIsClassified():
 	assert asmira.pqcKexStatus([gradedItem(pqc_kex_supported=True, pqc_kex_group='MLKEM768')]) == 'pure'
 
 
-@pytest.mark.parametrize('kex, certificate, level', [
-	('hybrid', ['hybrid'], 'complete'),
-	('hybrid', ['classical'], 'key_exchange'),
-	('classical', ['hybrid'], 'signature'),
-	('pure', ['pqc'], 'none'),
-	('hybrid', [], 'key_exchange'),
+@pytest.mark.parametrize('kex, certificate, chain, level', [
+	('hybrid', ['hybrid'], [], 'complete'),
+	('hybrid', ['hybrid'], ['hybrid'], 'complete'),
+	# L’ANSSI étend l’hybridation à la chaîne : une autorité classique la rompt.
+	('hybrid', ['hybrid'], ['classical'], 'key_exchange'),
+	('hybrid', ['classical'], [], 'key_exchange'),
+	('classical', ['hybrid'], [], 'signature'),
+	('pure', ['pqc'], [], 'none'),
+	('hybrid', [], [], 'key_exchange'),
 ])
-def testPqcHybridLevel(kex, certificate, level):
-	assert asmira.pqcHybridLevel(kex, certificate) == level
+def testPqcHybridLevel(kex, certificate, chain, level):
+	assert asmira.pqcHybridLevel(kex, certificate, chain) == level
+
+
+def testExposureEventsCarryChainHandshakeAndPortPqcWithoutPem():
+	event = asmira.buildExposureEvents([gradedItem(
+		certificate_pem='-----BEGIN CERTIFICATE-----\nfeuille\n-----END CERTIFICATE-----',
+		chain_pem=['-----BEGIN CERTIFICATE-----\nautorité\n-----END CERTIFICATE-----'],
+		chain_pqc_status='classical',
+		chain_pqc_algorithms=[],
+		peer_signature_type='rsa_pss_rsae_sha256',
+		peer_signature_pqc='classical',
+		port993='open',
+		tls_port993='tls',
+		cert_port993='valid',
+		cert_pqc_port993='classical',
+	)], '20260731T200000Z-12345678')[0]
+	exposure = event['asmira']['exposure']
+	tls = exposure['tls']
+
+	assert tls['certificate_chain_pqc_status'] == ['classical']
+	assert tls['handshake_signature_type'] == ['rsa_pss_rsae_sha256']
+	assert tls['handshake_signature_pqc_status'] == ['classical']
+	assert exposure['port']['993']['certificate_pqc'] == ['classical']
+	# Les PEM restent dans l’analyse du run, pas dans l’export Elastic.
+	endpoint = event['asmira']['raw']['endpoints'][0]
+	assert 'certificate_pem' not in endpoint and 'chain_pem' not in endpoint
+	assert 'BEGIN CERTIFICATE' not in json.dumps(event)
 
 
 def testExposureEventsFlagHybridAdoptionAndAcceptedGroups():
@@ -586,7 +615,9 @@ def testExposureEventsSummarisePortsAndFlagCleartextAndRdp():
 	assert exposure['cleartext_ports'] == [25]
 	assert '25:clear' in exposure['services']
 	assert exposure['port']['3389'] == {'state': ['open'], 'tls': ['tls']}
-	assert exposure['port']['25'] == {'state': ['open'], 'tls': ['clear'], 'certificate': []}
+	assert exposure['port']['25'] == {
+		'state': ['open'], 'tls': ['clear'], 'certificate': [], 'certificate_pqc': [],
+	}
 	assert {'CLEARTEXT_SERVICE', 'RDP_EXPOSED'} <= set(exposure['tls']['findings'])
 	assert exposure['tls']['max_severity'] == 'high'
 
@@ -614,7 +645,9 @@ def testCertificatesOfOtherPortsRaiseFindings(state, finding):
 	)], '20260731T200000Z-12345678')[0]
 	exposure = event['asmira']['exposure']
 
-	assert exposure['port']['993'] == {'state': ['open'], 'tls': ['tls'], 'certificate': [state]}
+	assert exposure['port']['993'] == {
+		'state': ['open'], 'tls': ['tls'], 'certificate': [state], 'certificate_pqc': [],
+	}
 	assert finding in exposure['tls']['findings']
 
 

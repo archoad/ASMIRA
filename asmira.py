@@ -161,6 +161,7 @@ PORT_CERTIFICATE_FINDINGS = {
 	'expiring': 'PORT_CERT_EXPIRES_30D',
 	'other_name': 'PORT_NAME_NOT_SERVED',
 }
+RAW_EXCLUDED_FIELDS = ('certificate_pem', 'chain_pem')
 
 
 def addFindings(tls, codes):
@@ -198,11 +199,13 @@ def tlsItemsOf(items):
 	return([item for item in items if item.get('port443') == 'open' and item.get('certificate_sha256')])
 
 
-def pqcHybridLevel(kexStatus, certificatePqcStatuses):
-	"""Adoption de l’approche hybride : échange de clés et signature du certificat."""
+def pqcHybridLevel(kexStatus, certificatePqcStatuses, chainPqcStatuses=()):
+	"""Adoption de l’approche hybride : échange de clés et signature du
+	certificat, chaîne d’autorités comprise lorsqu’elle a été envoyée (ANSSI)."""
 	kex = kexStatus == 'hybrid'
 	signature = bool(certificatePqcStatuses) and all(
-		status == 'hybrid' for status in certificatePqcStatuses
+		status == 'hybrid'
+		for status in (*certificatePqcStatuses, *chainPqcStatuses)
 	)
 	if kex and signature:
 		return('complete')
@@ -484,6 +487,15 @@ def previousItems(event):
 	return([])
 
 
+def rawEndpoint(item):
+	# Les PEM restent dans l’analyse du run : dans Elastic, ils alourdiraient
+	# chaque document sans être interrogeables.
+	return({
+		name: value for name, value in item.items()
+		if name not in RAW_EXCLUDED_FIELDS
+	})
+
+
 def buildFqdnObservation(items, runId):
 	items = sorted(
 		items,
@@ -606,7 +618,10 @@ def buildFqdnObservation(items, runId):
 					'state': itemValues(items, f'port{port}'),
 					'tls': itemValues(items, f'tls_port{port}'),
 					**(
-						{'certificate': itemValues(items, f'cert_port{port}')}
+						{
+							'certificate': itemValues(items, f'cert_port{port}'),
+							'certificate_pqc': itemValues(items, f'cert_pqc_port{port}'),
+						}
 						if port in webTLS.CERTIFICATE_PORTS else {}
 					),
 				}
@@ -650,6 +665,10 @@ def buildFqdnObservation(items, runId):
 				),
 				'certificate_pqc_algorithms': itemListValues(items, 'pqc_algorithms'),
 				'certificate_pqc_status': itemValues(items, 'pqc_status') or ['unknown'],
+				'certificate_chain_pqc_status': itemValues(items, 'chain_pqc_status'),
+				'certificate_chain_pqc_algorithms': itemListValues(items, 'chain_pqc_algorithms'),
+				'handshake_signature_type': itemValues(items, 'peer_signature_type'),
+				'handshake_signature_pqc_status': itemValues(items, 'peer_signature_pqc'),
 				'certificate_not_after': certificateDates,
 				'certificate_days_remaining': itemValues(items, 'remain'),
 				'certificate_expired': itemValues(items, 'has_expired'),
@@ -684,7 +703,7 @@ def buildFqdnObservation(items, runId):
 				'duration_seconds': round(sum(durations), 3),
 			},
 		},
-		'raw': {'endpoints': items},
+		'raw': {'endpoints': [rawEndpoint(item) for item in items]},
 	})
 	exposure = event['asmira']['exposure']
 	tls = exposure['tls']
@@ -692,6 +711,7 @@ def buildFqdnObservation(items, runId):
 		tls['pqc_hybrid_level'] = pqcHybridLevel(
 			tls['pqc_kex_status'],
 			[status for status in tls['certificate_pqc_status'] if status != 'unknown'],
+			tls['certificate_chain_pqc_status'],
 		)
 		tls['pqc_hybrid'] = tls['pqc_kex_status'] == 'hybrid'
 	if caa is not None:

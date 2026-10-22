@@ -1,12 +1,13 @@
 from datetime import datetime, timedelta, timezone
 import subprocess
+from pathlib import Path
 from types import SimpleNamespace
 
 import pandas as pd
 import pytest
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
-from cryptography.hazmat.primitives.asymmetric import ed25519, rsa
+from cryptography.hazmat.primitives.asymmetric import ec, ed25519, rsa
 from cryptography.x509.oid import NameOID
 
 import webTLS
@@ -316,7 +317,8 @@ def testExtractCertificateKeepsPqcStatusWhenPublicKeyIsUnsupported(monkeypatch):
 		signature_hash_algorithm = hashes.SHA256()
 
 		def public_key(self):
-			raise webTLS.UnsupportedAlgorithm('Clé PQC non prise en charge')
+			# Erreur réelle de cryptography 46 sur une clé ML-DSA.
+			raise ValueError('Unknown key type: 2.16.840.1.101.3.4.3.18')
 
 		def fingerprint(self, algorithm):
 			assert isinstance(algorithm, hashes.SHA256)
@@ -413,6 +415,91 @@ def testExtractTLSDataIncludesVerificationAndNegotiation():
 	assert result['verify_message'] == 'self-signed certificate'
 	assert result['negotiated_protocol'] == 'TLSv1.2'
 	assert result['negotiated_cipher'] == 'ECDHE-RSA-AES128-GCM-SHA256'
+
+
+def testExtractTLSDataClassifiesChainAndHandshakeSignature():
+	authorityKey = ec.generate_private_key(ec.SECP256R1())
+	leafKey = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+	authority = buildCertificate(authorityKey, subjectOrganization='Autorité').decode()
+	authorityName = x509.load_pem_x509_certificate(authority.encode()).subject
+	leaf = buildCertificate(
+		leafKey,
+		issuerName=authorityName,
+		issuerMaterial=authorityKey,
+	).decode()
+	output = f'''
+Certificate chain
+ 0 s:CN=www.example.com
+{leaf}
+ 1 s:CN=Autorité
+{authority}
+Peer signing digest: SHA256
+Peer signature type: rsa_pss_rsae_sha256
+New, TLSv1.3, Cipher is TLS_AES_256_GCM_SHA384
+Verify return code: 0 (ok)
+'''
+
+	result = webTLS.extractTLSdata(output)
+
+	assert result['certificate_pem'] == leaf.strip()
+	assert result['chain_pem'] == [authority.strip()]
+	assert result['chain_pqc_status'] == 'classical'
+	assert result['chain_pqc_algorithms'] == []
+	assert result['peer_signature_type'] == 'rsa_pss_rsae_sha256'
+	assert result['peer_signature_pqc'] == 'classical'
+
+
+def testExtractTLSDataWithoutChainHasNoChainStatus():
+	privateKey = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+	certificate = buildCertificate(privateKey).decode()
+
+	result = webTLS.extractTLSdata(f'{certificate}\nVerify return code: 0 (ok)\n')
+
+	assert 'chain_pqc_status' not in result
+	assert 'peer_signature_type' not in result
+
+
+@pytest.mark.parametrize('name, expected', [
+	('rsa_pss_rsae_sha256', 'classical'),
+	('ecdsa_secp256r1_sha256', 'classical'),
+	('RSA-PSS', 'classical'),
+	('mldsa65', 'pqc'),
+	('slhdsa_sha2_128s', 'pqc'),
+	('mldsa44_ecdsa_secp256r1_sha256', 'hybrid'),
+	('mldsa65_rsa3072_pss_sha512', 'hybrid'),
+])
+def testClassifyHandshakeSignature(name, expected):
+	assert webTLS.classifyHandshakeSignature(name) == expected
+
+
+def testClassifyChainPemReportsMixedChains(monkeypatch):
+	statuses = iter([('hybrid', ['ML-DSA-65+ECDSA-P256']), ('classical', [])])
+	monkeypatch.setattr(webTLS, 'classifyCertificatePqc', lambda *args: next(statuses))
+	authorityKey = ec.generate_private_key(ec.SECP256R1())
+	pem = buildCertificate(authorityKey).decode()
+
+	result = webTLS.classifyChainPem([pem, pem])
+
+	assert result['chain_pqc_status'] == 'partial'
+	assert result['chain_pqc_algorithms'] == ['ML-DSA-65+ECDSA-P256']
+
+
+FIXTURES_DIR = Path(__file__).resolve().parent / 'fixtures'
+
+
+@pytest.mark.parametrize('fileName, status, selfSigned', [
+	# Certificats ML-DSA réels produits par OpenSSL 3.5 : cryptography 46 ne sait
+	# pas lire leur clé, la sonde doit quand même les classer.
+	('mldsa65-leaf-signed-by-ecdsa.pem', 'partial', False),
+	('mldsa65-self-signed.pem', 'pqc', True),
+])
+def testExtractCertificateReadsRealMlDsaCertificates(fileName, status, selfSigned):
+	result = webTLS.extractCertificateData((FIXTURES_DIR / fileName).read_text())
+
+	assert result['pqc_status'] == status
+	assert result['pqc_algorithms'] == ['ML-DSA-65']
+	assert result['public_key'] == 'Unsupported'
+	assert result['self-signed'] is selfSigned
 
 
 def testExtractTLSDataReadsTls13CipherLine():
