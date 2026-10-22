@@ -1,0 +1,302 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v5.json",
+  "autosize": {"type": "fit", "contains": "padding"},
+  "padding": 8,
+  "signals": [
+    {"name": "cx", "update": "width / 2"},
+    {"name": "cy", "update": "height / 2"},
+    {"name": "rayon", "update": "max(min(width, height) / 2 - 70, 40)"},
+    {"name": "nbDomaines", "update": "length(data('domaines'))"},
+    {"name": "unDomaine", "update": "nbDomaines === 1"},
+    {"name": "nbFeuilles", "update": "unDomaine ? length(data('fqdnClasses')) : nbDomaines"},
+    {"name": "parAnneau", "update": "unDomaine ? 6 : max(nbFeuilles, 1)"},
+    {"name": "dernierAnneau", "update": "floor(sqrt(max(nbFeuilles - 1, 0) / parAnneau))"},
+    {"name": "maxFqdn", "update": "max(1, extent(pluck(data('domaines'), 'n'))[1])"},
+    {"name": "avecLibelles", "update": "nbFeuilles <= 60"},
+    {
+      "name": "titreCentre",
+      "update": "unDomaine ? data('domaines')[0].domaine : nbDomaines + ' domaines surveillés'"
+    },
+    {
+      "name": "filtrerDomaine",
+      "on": [
+        {
+          "events": "@noeuds:click",
+          "update": "unDomaine ? null : kibanaAddFilter({match_phrase: {'server.registered_domain': datum.libelle}}, 'asmira-exposure-current')"
+        }
+      ]
+    }
+  ],
+  "data": [
+    {
+      "name": "fqdn",
+      "url": {
+        "%context%": true,
+        "index": "asmira-exposure-current",
+        "body": {
+          "size": 10000,
+          "_source": [
+            "server.domain",
+            "server.registered_domain",
+            "asmira.exposure.tls.grade"
+          ]
+        }
+      },
+      "format": {"property": "hits.hits"},
+      "transform": [
+        {"type": "formula", "as": "libelle", "expr": "datum._source.server.domain"},
+        {"type": "formula", "as": "domaine", "expr": "datum._source.server.registered_domain"},
+        {
+          "type": "formula",
+          "as": "note",
+          "expr": "datum._source.asmira && datum._source.asmira.exposure && datum._source.asmira.exposure.tls && datum._source.asmira.exposure.tls.grade ? datum._source.asmira.exposure.tls.grade : 'Sans HTTPS'"
+        },
+        {
+          "type": "formula",
+          "as": "rang",
+          "expr": "indexof(['T', 'M', 'F', 'E', 'D', 'C', 'B', 'A-', 'A', 'A+', 'NA', 'Sans HTTPS'], datum.note)"
+        },
+        {
+          "type": "formula",
+          "as": "aCorriger",
+          "expr": "indexof(['T', 'M', 'F', 'E', 'D', 'C'], datum.note) >= 0 ? 1 : 0"
+        }
+      ]
+    },
+    {
+      "name": "domaines",
+      "source": "fqdn",
+      "transform": [
+        {
+          "type": "aggregate",
+          "groupby": ["domaine"],
+          "fields": [null, "aCorriger"],
+          "ops": ["count", "sum"],
+          "as": ["n", "nCorriger"]
+        },
+        {"type": "formula", "as": "part", "expr": "datum.nCorriger / datum.n"}
+      ]
+    },
+    {
+      "name": "fqdnClasses",
+      "source": "fqdn",
+      "transform": [
+        {"type": "filter", "expr": "unDomaine"},
+        {
+          "type": "window",
+          "sort": {"field": ["rang", "libelle"]},
+          "ops": ["row_number"],
+          "as": ["i"]
+        },
+        {"type": "formula", "as": "n", "expr": "1"}
+      ]
+    },
+    {
+      "name": "domainesClasses",
+      "source": "domaines",
+      "transform": [
+        {"type": "filter", "expr": "!unDomaine"},
+        {
+          "type": "window",
+          "sort": {"field": "n", "order": "descending"},
+          "ops": ["row_number"],
+          "as": ["i"]
+        },
+        {"type": "formula", "as": "libelle", "expr": "datum.domaine"},
+        {"type": "formula", "as": "note", "expr": "'Domaine'"}
+      ]
+    },
+    {
+      "name": "feuilles",
+      "source": ["fqdnClasses", "domainesClasses"],
+      "transform": [
+        {"type": "formula", "as": "anneau", "expr": "floor(sqrt((datum.i - 1) / parAnneau))"},
+        {"type": "formula", "as": "place", "expr": "datum.i - 1 - parAnneau * datum.anneau * datum.anneau"},
+        {
+          "type": "formula",
+          "as": "capacite",
+          "expr": "min(parAnneau * (2 * datum.anneau + 1), nbFeuilles - parAnneau * datum.anneau * datum.anneau)"
+        },
+        {
+          "type": "formula",
+          "as": "angle",
+          "expr": "2 * PI * datum.place / datum.capacite + datum.anneau * 0.37 - PI / 2"
+        },
+        {"type": "formula", "as": "r", "expr": "rayon * (datum.anneau + 1) / (dernierAnneau + 1)"},
+        {"type": "formula", "as": "x", "expr": "cx + datum.r * cos(datum.angle)"},
+        {
+          "type": "formula",
+          "as": "ecart",
+          "expr": "unDomaine ? 10 : 8 + sqrt(scale('taille', datum.n) / PI)"
+        },
+        {"type": "formula", "as": "y", "expr": "cy + datum.r * sin(datum.angle)"},
+        {
+          "type": "formula",
+          "as": "texte",
+          "expr": "unDomaine ? replace(datum.libelle, '.' + datum.domaine, '') : datum.libelle + ' (' + datum.n + ')'"
+        }
+      ]
+    },
+    {"name": "centre", "values": [{}]}
+  ],
+  "scales": [
+    {
+      "name": "note",
+      "type": "ordinal",
+      "domain": ["A+", "A", "A-", "B", "C", "D", "E", "F", "M", "T", "NA", "Sans HTTPS"],
+      "range": [
+        "#1B7A3E", "#2E8B57", "#6DB36F", "#B5C334", "#E5A823", "#E07B22",
+        "#D2561E", "#BD271E", "#9B3FB5", "#7A1020", "#98A2B3", "#D3DAE6"
+      ]
+    },
+    {
+      "name": "part",
+      "type": "linear",
+      "domain": [0, 0.1, 0.25],
+      "range": ["#2E8B57", "#E5A823", "#BD271E"],
+      "clamp": true
+    },
+    {
+      "name": "taille",
+      "type": "sqrt",
+      "domain": [0, {"signal": "maxFqdn"}],
+      "range": [60, 1600]
+    }
+  ],
+  "legends": [
+    {
+      "fill": "note",
+      "title": "Note TLS",
+      "orient": "top-right",
+      "symbolType": "circle",
+      "titleFontSize": 11,
+      "labelFontSize": 10,
+      "encode": {
+        "title": {"update": {"opacity": {"signal": "unDomaine ? 1 : 0"}}},
+        "symbols": {"update": {"opacity": {"signal": "unDomaine ? 1 : 0"}}},
+        "labels": {"update": {"opacity": {"signal": "unDomaine ? 1 : 0"}}}
+      }
+    },
+    {
+      "fill": "part",
+      "type": "gradient",
+      "title": "FQDN à corriger",
+      "orient": "top-right",
+      "format": ".0%",
+      "values": [0, 0.1, 0.25],
+      "gradientLength": 160,
+      "titleFontSize": 11,
+      "labelFontSize": 10,
+      "encode": {
+        "title": {"update": {"opacity": {"signal": "unDomaine ? 0 : 1"}}},
+        "gradient": {"update": {"opacity": {"signal": "unDomaine ? 0 : 1"}}},
+        "labels": {"update": {"opacity": {"signal": "unDomaine ? 0 : 1"}}}
+      }
+    }
+  ],
+  "marks": [
+    {
+      "type": "rule",
+      "from": {"data": "feuilles"},
+      "interactive": false,
+      "encode": {
+        "update": {
+          "x": {"signal": "cx"},
+          "y": {"signal": "cy"},
+          "x2": {"field": "x"},
+          "y2": {"field": "y"},
+          "stroke": {"value": "#B4BFCE"},
+          "strokeWidth": {"value": 0.6},
+          "opacity": {"signal": "nbFeuilles > 300 ? 0.15 : 0.5"}
+        }
+      }
+    },
+    {
+      "type": "symbol",
+      "name": "noeuds",
+      "from": {"data": "feuilles"},
+      "encode": {
+        "update": {
+          "x": {"field": "x"},
+          "y": {"field": "y"},
+          "shape": {"value": "circle"},
+          "size": {
+            "signal": "unDomaine ? (nbFeuilles > 300 ? 35 : 110) : scale('taille', datum.n)"
+          },
+          "fill": {"signal": "unDomaine ? scale('note', datum.note) : scale('part', datum.part)"},
+          "stroke": {"value": "#FFFFFF"},
+          "strokeWidth": {"value": 1},
+          "cursor": {"signal": "unDomaine ? 'default' : 'pointer'"},
+          "tooltip": {
+            "signal": "unDomaine ? {'FQDN': datum.libelle, 'Note TLS': datum.note} : {'Domaine': datum.libelle, 'FQDN': datum.n, 'À corriger': datum.nCorriger + ' (' + format(datum.part, '.0%') + ')', 'Action': 'cliquer pour afficher ses FQDN'}"
+          }
+        },
+        "hover": {"stroke": {"value": "#343741"}, "strokeWidth": {"value": 2}}
+      }
+    },
+    {
+      "type": "text",
+      "from": {"data": "feuilles"},
+      "interactive": false,
+      "encode": {
+        "update": {
+          "x": {"signal": "cx + (datum.r + datum.ecart) * cos(datum.angle)"},
+          "y": {"signal": "cy + (datum.r + datum.ecart) * sin(datum.angle)"},
+          "text": {"signal": "avecLibelles ? datum.texte : ''"},
+          "align": {"signal": "cos(datum.angle) >= 0 ? 'left' : 'right'"},
+          "baseline": {"value": "middle"},
+          "fontSize": {"value": 10},
+          "fill": {"value": "#343741"}
+        }
+      }
+    },
+    {
+      "type": "symbol",
+      "from": {"data": "centre"},
+      "interactive": false,
+      "encode": {
+        "update": {
+          "x": {"signal": "cx"},
+          "y": {"signal": "cy"},
+          "size": {"value": 900},
+          "fill": {"value": "#343741"},
+          "opacity": {"signal": "nbFeuilles > 0 ? 1 : 0"}
+        }
+      }
+    },
+    {
+      "type": "text",
+      "from": {"data": "centre"},
+      "interactive": false,
+      "encode": {
+        "update": {
+          "x": {"signal": "cx"},
+          "y": {"signal": "cy + 26"},
+          "text": {"signal": "nbFeuilles > 0 ? titreCentre : 'Aucun FQDN pour cette sélection'"},
+          "align": {"value": "center"},
+          "baseline": {"value": "top"},
+          "fontSize": {"value": 12},
+          "fontWeight": {"value": "bold"},
+          "fill": {"value": "#343741"}
+        }
+      }
+    },
+    {
+      "type": "text",
+      "from": {"data": "centre"},
+      "interactive": false,
+      "encode": {
+        "update": {
+          "x": {"value": 4},
+          "y": {"value": 4},
+          "text": {
+            "signal": "unDomaine ? (nbFeuilles + ' FQDN, colorés selon leur note TLS' + (avecLibelles ? '' : ' (survoler un point pour son nom)')) : 'Cliquer sur un domaine ou le choisir dans le contrôle Domaine pour afficher ses FQDN'"
+          },
+          "baseline": {"value": "top"},
+          "fontSize": {"value": 11},
+          "fill": {"value": "#69707D"}
+        }
+      }
+    }
+  ]
+}

@@ -135,6 +135,12 @@ dernier run, construit le volume historique depuis
 période réellement sélectionnée. Les panneaux de découverte DNS utilisent
 `asmira-discovery-latest` et ignorent explicitement les contrôles d’exposition,
 dont les champs `server.*` n’existent pas dans les événements de découverte.
+Depuis le 22 octobre 2026, la section **Graphe des domaines** termine le
+dashboard : un panneau Vega montre les domaines surveillés en bulles (taille =
+nombre de FQDN, couleur = part de FQDN à corriger) ou, pour un domaine choisi
+dans le contrôle Domaine ou d’un clic, l’étoile de ses FQDN colorés par note
+TLS. Aucun domaine n’est écrit dans la spec ; l’API Dashboards ignorant Vega,
+`elastic/setup.py` rattache le panneau au saved object après le PUT.
 Des panneaux Markdown précèdent chaque section majeure, les graphiques XY
 masquent leurs titres d’axes, et le panneau d’erreurs d’endpoints a été retiré
 au profit de la santé synthétique du run. À côté du statut PQC, le panneau

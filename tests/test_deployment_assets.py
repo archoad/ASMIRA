@@ -52,7 +52,7 @@ def testElasticJsonAssetsAreValidAndDashboardIsGlobal():
 	assert fqdnTransform['dest']['index'] == 'asmira-fqdn-latest'
 	assert 'retention_policy' not in fqdnTransform
 	assert dashboard['title'] == '[archoad] Asmira — Surface d’exposition globale'
-	assert len(dashboard['panels']) == 49
+	assert len(dashboard['panels']) == 50
 	controls = dashboard['pinned_panels']
 	assert [control['config']['title'] for control in controls] == ['Domaine', 'FQDN']
 	assert [control['config']['field_name'] for control in controls] == [
@@ -120,7 +120,7 @@ def testElasticJsonAssetsAreValidAndDashboardIsGlobal():
 		for panel in dashboard['panels']
 		if panel['type'] == 'markdown'
 	]
-	assert len(markdownPanels) == 7
+	assert len(markdownPanels) == 8
 	markdownContent = '\n'.join(
 		panel['config']['content']
 		for panel in markdownPanels
@@ -133,6 +133,7 @@ def testElasticJsonAssetsAreValidAndDashboardIsGlobal():
 		'Surface d’exposition',
 		'Santé du pipeline',
 		'Découverte DNS',
+		'Graphe des domaines',
 	):
 		assert heading in markdownContent
 	xyPanels = [
@@ -426,10 +427,47 @@ def testKibanaSetupCreatesCertificateDataViewAndPrefixedDashboard():
 
 		def request(self, method, path, payload=None, allowedStatuses=()):
 			self.calls.append((method, path, payload))
+			if method == 'GET':
+				# Panneaux laissés par le PUT, dont un graphe d’un déploiement antérieur.
+				return({'attributes': {'panelsJSON': json.dumps([
+					{'panelIndex': 'a', 'gridData': {'x': 0, 'y': 0, 'w': 48, 'h': 4}},
+					{'panelIndex': 'b', 'gridData': {'x': 0, 'y': 4, 'w': 24, 'h': 10}},
+					{
+						'panelIndex': 'asmira-domain-graph',
+						'gridData': {'x': 0, 'y': 14, 'w': 48, 'h': 30},
+					},
+				])}})
 			return({})
 
 	client = FakeClient()
 	elasticSetup.configureKibana(client)
+	putPaths = [path for method, path, payload in client.calls if method == 'PUT']
+	assert putPaths == [
+		'api/dashboards/asmira-global',
+		'api/saved_objects/dashboard/asmira-global',
+	]
+	savedPanels = json.loads(
+		client.calls[-1][2]['attributes']['panelsJSON']
+	)
+	graphPanels = [
+		panel
+		for panel in savedPanels
+		if panel['panelIndex'] == 'asmira-domain-graph'
+	]
+	assert len(savedPanels) == 3 and len(graphPanels) == 1
+	graphPanel = graphPanels[0]
+	assert graphPanel['type'] == 'legacy_vis'
+	assert graphPanel['gridData']['y'] == 14
+	savedVis = graphPanel['embeddableConfig']['savedVis']
+	assert savedVis['type'] == 'vega'
+	spec = json.loads(savedVis['params']['spec'])
+	fqdnData = next(data for data in spec['data'] if data['name'] == 'fqdn')
+	# Le contexte du dashboard (contrôle Domaine, filtres) pilote le graphe :
+	# aucun domaine réel n’est écrit dans la spec.
+	assert fqdnData['url']['%context%'] is True
+	assert fqdnData['url']['index'] == 'asmira-exposure-current'
+	assert 'query' not in fqdnData['url']['body']
+	assert 'archoad' not in savedVis['params']['spec']
 	dataViewIds = {
 		payload['data_view']['id']
 		for method, path, payload in client.calls

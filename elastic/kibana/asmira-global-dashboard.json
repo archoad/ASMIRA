@@ -1861,6 +1861,22 @@
           }
         ]
       }
+    },
+    {
+      "type": "markdown",
+      "config": {
+        "content": "### Graphe des domaines\nSans sélection, chaque bulle est un domaine surveillé : sa taille suit le nombre de FQDN, sa couleur la part de FQDN à corriger (note C ou moins, **T** ou **M**). Cliquer sur une bulle, ou choisir un domaine dans le contrôle **Domaine**, affiche l’étoile de ses FQDN colorés selon leur note TLS, les plus mal notés au plus près du centre.",
+        "hide_border": true,
+        "settings": {
+          "open_links_in_new_tab": true
+        }
+      },
+      "grid": {
+        "x": 0,
+        "y": 285,
+        "w": 48,
+        "h": 4
+      }
     }
   ]
 }

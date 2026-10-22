@@ -14,6 +14,8 @@ from urllib.request import Request, urlopen
 BASE_DIR = Path(__file__).resolve().parent
 DATA_STREAMS = ('discovery', 'exposure', 'run')
 LEGACY_EXPOSURE_LATEST = 'asmira-exposure-latest'
+DOMAIN_GRAPH_PANEL = 'asmira-domain-graph'
+DOMAIN_GRAPH_TITLE = 'Graphe des FQDN par domaine'
 TRANSFORM_UPDATE_FIELDS = (
 	'_meta',
 	'description',
@@ -312,6 +314,51 @@ def configureKibana(client):
 		'api/dashboards/asmira-global',
 		loadJson('kibana/asmira-global-dashboard.json'),
 	)
+	attachDomainGraph(client)
+
+
+def attachDomainGraph(client):
+	# L’API Dashboards 9.5 ignore les panneaux Vega et les efface à chaque PUT :
+	# le graphe est rattaché ensuite au saved object, sous le dernier panneau.
+	dashboard = client.request('GET', 'api/saved_objects/dashboard/asmira-global')
+	panels = dashboard['attributes']['panelsJSON']
+	if isinstance(panels, str):
+		panels = json.loads(panels)
+	panels = [panel for panel in panels if panel.get('panelIndex') != DOMAIN_GRAPH_PANEL]
+	bottom = max(
+		(panel['gridData']['y'] + panel['gridData']['h'] for panel in panels),
+		default=0,
+	)
+	spec = json.dumps(
+		loadJson('kibana/asmira-domain-graph.vega.json'),
+		ensure_ascii=False,
+		indent=2,
+	)
+	panels.append({
+		'type': 'legacy_vis',
+		'panelIndex': DOMAIN_GRAPH_PANEL,
+		'gridData': {'x': 0, 'y': bottom, 'w': 48, 'h': 30, 'i': DOMAIN_GRAPH_PANEL},
+		'embeddableConfig': {
+			'title': DOMAIN_GRAPH_TITLE,
+			'savedVis': {
+				'title': DOMAIN_GRAPH_TITLE,
+				'description': '',
+				'type': 'vega',
+				'params': {'spec': spec},
+				'uiState': {},
+				'data': {
+					'aggs': [],
+					'searchSource': {
+						'query': {'query': '', 'language': 'kuery'},
+						'filter': [],
+					},
+				},
+			},
+		},
+	})
+	client.request('PUT', 'api/saved_objects/dashboard/asmira-global', {
+		'attributes': {'panelsJSON': json.dumps(panels, ensure_ascii=False)},
+	})
 
 
 def parseArguments(argv=None):
