@@ -52,7 +52,7 @@ def testElasticJsonAssetsAreValidAndDashboardIsGlobal():
 	assert fqdnTransform['dest']['index'] == 'asmira-fqdn-latest'
 	assert 'retention_policy' not in fqdnTransform
 	assert dashboard['title'] == '[archoad] Asmira — Surface d’exposition globale'
-	assert len(dashboard['panels']) == 49
+	assert len(dashboard['panels']) == 53
 	controls = dashboard['pinned_panels']
 	assert [control['config']['title'] for control in controls] == ['Domaine', 'FQDN']
 	assert [control['config']['field_name'] for control in controls] == [
@@ -121,7 +121,7 @@ def testElasticJsonAssetsAreValidAndDashboardIsGlobal():
 		for panel in dashboard['panels']
 		if panel['type'] == 'markdown'
 	]
-	assert len(markdownPanels) == 7
+	assert len(markdownPanels) == 8
 	markdownContent = '\n'.join(
 		panel['config']['content']
 		for panel in markdownPanels
@@ -134,6 +134,7 @@ def testElasticJsonAssetsAreValidAndDashboardIsGlobal():
 		'Surface d’exposition',
 		'Découverte DNS',
 		'Graphe des domaines',
+		'### SSH',
 	):
 		assert heading in markdownContent
 	xyPanels = [
@@ -205,6 +206,22 @@ def testElasticJsonAssetsAreValidAndDashboardIsGlobal():
 	):
 		assert f'asmira.exposure.tls.{fieldName}' in tableQuery
 	assert pqcTable['config']['metrics'] == [{'column': 'Adresses'}]
+	assert {'column': 'Autres ports'} in pqcTable['config']['rows']
+	# Champs de port à segment numérique : ES|QL exige des backticks.
+	assert '`asmira.exposure.port.993.certificate_pqc`' in tableQuery
+	sshMappings = mappings['asmira']['properties']['exposure']['properties']['ssh']['properties']
+	assert sshMappings['ip']['type'] == 'ip'
+	assert sshMappings['cipher_256']['type'] == 'boolean'
+	for fieldName in ('software', 'pqc_kex_status', 'host_key_pqc_status', 'weak_algorithms'):
+		assert sshMappings[fieldName]['type'] == 'keyword'
+	sshTable = next(
+		panel
+		for panel in dashboard['panels']
+		if panel['config'].get('title') == 'Serveurs SSH exposés'
+	)
+	# Une ligne par adresse : la clé d’hôte appartient à la machine, pas au FQDN.
+	assert 'BY Adresse = asmira.exposure.ssh.ip' in sshTable['config']['data_source']['query']
+	assert sshTable['config']['metrics'] == [{'column': 'FQDN'}]
 	portMappings = mappings['asmira']['properties']['exposure']['properties']['port']['properties']
 	for port in ('25', '465', '587', '993', '995', '8080', '8443'):
 		assert portMappings[port]['properties']['certificate_pqc']['type'] == 'keyword'
@@ -222,6 +239,9 @@ def testElasticJsonAssetsAreValidAndDashboardIsGlobal():
 	)
 	assert cryptoLayer['x'] == {'column': 'Suite'}
 	assert cryptoLayer['breakdown_by'] == {'column': 'Évaluation'}
+	# L’ANSSI recommande des clés symétriques de 256 bits face au quantique.
+	assert 'TLS 1.3, AES-128 : acceptable' in cryptoLayer['data_source']['query']
+	assert 'TLS 1.3, AES-256 ou ChaCha20 : recommandée' in cryptoLayer['data_source']['query']
 	# Kibana masque la légende des XY par défaut : la forcer dès qu’il y a plusieurs séries.
 	for panel in xyPanels:
 		layer = panel['config']['layers'][0]
@@ -229,12 +249,12 @@ def testElasticJsonAssetsAreValidAndDashboardIsGlobal():
 			assert panel['config']['legend'] == {'visibility': 'visible'}
 	for title, expected in (
 		('Certificats auto-signés', {
-			'Émis par une autorité': '#2E8B57',
-			'Auto-signé': '#BD271E',
+			'Émis par une autorité': '#54B399',
+			'Auto-signé': '#E7664C',
 		}),
 		('Validation des chaînes TLS', {
-			'Chaîne valide': '#2E8B57',
-			'Chaîne invalide': '#BD271E',
+			'Chaîne valide': '#54B399',
+			'Chaîne invalide': '#E7664C',
 		}),
 	):
 		booleanPanel = next(

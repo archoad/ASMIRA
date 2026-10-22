@@ -161,6 +161,10 @@ Toute modification des seuils ou des plafonds impose d’incrémenter
   (`PORT_NAME_NOT_SERVED`, informatif). Les
   constats `CLEARTEXT_SERVICE` et `RDP_EXPOSED` s’appliquent aussi aux FQDN sans
   HTTPS.
+- **SSH** : le port 22 n’est compté SSH que si le serveur présente sa bannière ;
+  ses algorithmes, lus une fois par adresse sans authentification, lèvent
+  `SSH_NO_PQC_KEX` (aucun échange de clés hybride ; NTRU Prime, hybride non
+  normalisé, n’en lève pas) et `SSH_WEAK_ALGORITHMS`, sans effet sur la note.
 - **CAA** : le CAA effectif de chaque FQDN est celui qu’une autorité appliquerait
   (RFC 8659), avec les autorités autorisées et l’existence connue d’une offre
   ACME. `CAA_ISSUER_NOT_AUTHORIZED` signale un certificat dont l’émetteur n’est

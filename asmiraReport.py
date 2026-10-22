@@ -230,6 +230,29 @@ def analyseDomains(events):
 	return(rows)
 
 
+SSH_KEX_ORDER = ('classical', 'pure', 'hybrid_sntrup', 'hybrid')
+
+
+def analyseSsh(events):
+	"""Serveurs SSH comptés par adresse (une machine sert souvent plusieurs FQDN) :
+	statut d’échange de clés le plus faible vu pour l’adresse, et algorithmes obsolètes."""
+	statusByAddress = {}
+	weakAddresses = set()
+	for event in events:
+		ssh = exposureOf(event).get('ssh') or {}
+		statuses = ssh.get('pqc_kex_status') or []
+		worst = next((status for status in SSH_KEX_ORDER if status in statuses), 'unknown')
+		for address in ssh.get('ip') or []:
+			previous = statusByAddress.get(address)
+			if previous is None or (worst in SSH_KEX_ORDER and (
+				previous not in SSH_KEX_ORDER or SSH_KEX_ORDER.index(worst) < SSH_KEX_ORDER.index(previous)
+			)):
+				statusByAddress[address] = worst
+			if ssh.get('weak_algorithms'):
+				weakAddresses.add(address)
+	return({'kex': Counter(statusByAddress.values()), 'weak': len(weakAddresses)})
+
+
 def analyseExposure(exposureEvents, previousEvents, partial):
 	allEvents = list(exposureEvents or [])
 	events = [event for event in allEvents if isPresent(event)]
@@ -297,6 +320,7 @@ def analyseExposure(exposureEvents, previousEvents, partial):
 		'certificate_pqc': Counter(
 			status for event in events for status in tlsOf(event).get('certificate_pqc_status') or []
 		),
+		'ssh': analyseSsh(events),
 		'expired': sorted((item for item in remaining if item[1] < 0), key=lambda item: item[1]),
 		'expiring': sorted(
 			(item for item in remaining if 0 <= item[1] < asmiraGrade.EXPIRY_WARNING_DAYS),
@@ -538,7 +562,9 @@ def renderSummary(analysis):
 			f'{fmt(exposure["severities"].get("high", 0))} au niveau élevé ; '
 			f'{fmt(exposure["opened_total"])} apparus, {fmt(exposure["resolved_total"])} corrigés.',
 			f'Post-quantique : {fmt(exposure["kex"].get("hybrid", 0))} FQDN en échange de clés hybride '
-			f'({percent(exposure["kex"].get("hybrid", 0), sum(exposure["kex"].values()))} des FQDN en TLS).',
+			f'({percent(exposure["kex"].get("hybrid", 0), sum(exposure["kex"].values()))} des FQDN en TLS) ; '
+			f'SSH : {fmt(exposure["ssh"]["kex"].get("hybrid", 0))} serveur(s) sur '
+			f'{fmt(sum(exposure["ssh"]["kex"].values()))} en échange hybride ML-KEM.',
 			f'Certificats : {fmt(len(exposure["expired"]))} expirés, {fmt(len(exposure["expiring"]))} expirent '
 			f'sous {asmiraGrade.EXPIRY_WARNING_DAYS} jours.',
 		]
@@ -983,6 +1009,17 @@ def renderTls(analysis, maxItems):
 			f'{CERTIFICATE_PQC_LABELS.get(status, status)} ({fmt(count)})'
 			for status, count in exposure['certificate_pqc'].most_common()
 		) + '. Aucune autorité publique n’émet encore de certificat ML-DSA.'))
+	ssh = exposure.get('ssh') or {}
+	sshTotal = sum((ssh.get('kex') or {}).values())
+	if sshTotal:
+		kex = ssh['kex']
+		parts.append(paragraph(
+			f'SSH : {fmt(sshTotal)} serveur(s), comptés par adresse. '
+			f'{fmt(kex.get("hybrid", 0))} proposent un échange de clés hybride ML-KEM (cible ANSSI), '
+			f'{fmt(kex.get("hybrid_sntrup", 0))} seulement NTRU Prime (hybride non normalisé), '
+			f'{fmt(kex.get("classical", 0) + kex.get("pure", 0))} aucun échange hybride ; '
+			f'{fmt(ssh.get("weak", 0))} proposent encore des algorithmes obsolètes.'
+		))
 	return(section('tls', '4. État TLS et post-quantique', *parts))
 
 

@@ -587,4 +587,26 @@ Points techniques retenus :
   vrai certificat post-quantique en échec de handshake. Reste à faire, décidé
   avec l’utilisateur : une sonde dédiée `-sigalgs mldsa…` pour détecter un second
   certificat ML-DSA (OpenSSL 3.5 propose ML-DSA en dernier, un serveur à double
-  certificat sert donc le classique), plus tard ou en option.
+  certificat sert donc le classique), plus tard ou en option. Ensuite : colonne
+  « Autres ports » du bilan PQC (champs `port.<p>.certificate_pqc`, entre
+  backticks en ES|QL à cause du segment numérique) et suites AES-128 classées
+  « acceptables » (ANSSI : clés symétriques de 256 bits), AES-256 et ChaCha20
+  « recommandées » ; la note TLS n’est pas modifiée.
+- **2026-10-22 — Purge des runs.** `/var/lib/asmira/runs` atteignait 956 Mo
+  (33 runs, checkpoint dupliquant chaque analyse) sans jamais être relu d’un run
+  à l’autre. `cleanRuns` ne garde que le run courant, sans checkpoint, après un
+  run réussi avec analyse et sans `max_endpoints` (les runs sont souvent
+  `partial` à cause d’Amass ou de Cert Spotter : la condition ne porte donc pas
+  sur la complétude). Le compte `codex` n’a qu’un accès en lecture à `runs/` :
+  la purge initiale se fait en root.
+- **2026-10-22 — SSH post-quantique (fiche ANSSI SSHv2).** Le port 22 n’était
+  classé `ssh` que sur la foi du port ouvert ; `sshObservation` lit désormais la
+  bannière et le KEXINIT (Python pur, une connexion par adresse et par run,
+  sans authentification) et le port n’est SSH que sur bannière. Champs
+  `asmira.exposure.ssh.*` ; `pqc_kex_status` vaut `hybrid` (ML-KEM),
+  `hybrid_sntrup` (NTRU Prime : hybride non normalisé, choix validé par
+  l’utilisateur, sans constat), `pure` ou `classical`. Constats hors note
+  `SSH_NO_PQC_KEX` (low) et `SSH_WEAK_ALGORITHMS` (medium) ; l’exposition de SSH
+  n’est volontairement pas signalée. Dashboard : sous-section SSH comptée par
+  adresse ; bilan e-mail : ligne SSH. Limite : seul le port 22 est sondé
+  (le SSH de `srv` écoute sur 42). Validé sur OpenSSH 10.0 de `srv`.

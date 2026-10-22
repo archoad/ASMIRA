@@ -153,6 +153,22 @@
                     "8443": { "properties": { "state": { "type": "keyword" }, "tls": { "type": "keyword" }, "certificate": { "type": "keyword" }, "certificate_pqc": { "type": "keyword" } } }
                   }
                 },
+                "ssh": {
+                  "properties": {
+                    "ip": { "type": "ip" },
+                    "banner": { "type": "keyword" },
+                    "software": { "type": "keyword" },
+                    "kex_algorithms": { "type": "keyword" },
+                    "host_key_algorithms": { "type": "keyword" },
+                    "ciphers": { "type": "keyword" },
+                    "macs": { "type": "keyword" },
+                    "pqc_kex_status": { "type": "keyword" },
+                    "pqc_kex_algorithms": { "type": "keyword" },
+                    "host_key_pqc_status": { "type": "keyword" },
+                    "cipher_256": { "type": "boolean" },
+                    "weak_algorithms": { "type": "keyword" }
+                  }
+                },
                 "open_ports": { "type": "integer" },
                 "cleartext_ports": { "type": "integer" },
                 "services": { "type": "keyword" },

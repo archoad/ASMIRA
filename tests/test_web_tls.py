@@ -1268,3 +1268,139 @@ def testRemoveOldFilesOnlyDeletesManagedPictures(monkeypatch, tmp_path):
 	assert not graph.exists()
 	assert not screen.exists()
 	assert userFile.read_text() == 'keep'
+
+
+def buildKexinitPacket(kex, hostKeys, ciphers, macs):
+	def nameList(names):
+		raw = ','.join(names).encode()
+		return(len(raw).to_bytes(4, 'big') + raw)
+
+	payload = (
+		bytes([webTLS.SSH_MSG_KEXINIT]) + b'\x00' * 16
+		+ nameList(kex) + nameList(hostKeys)
+		+ nameList(ciphers) + nameList(ciphers)
+		+ nameList(macs) + nameList(macs)
+		+ nameList(['none']) + nameList(['none'])
+		+ nameList([]) + nameList([])
+		+ b'\x00' + b'\x00' * 4
+	)
+	padding = 8
+	body = bytes([padding]) + payload + b'\x00' * padding
+	return(len(body).to_bytes(4, 'big') + body)
+
+
+class FakeSshConnection:
+	def __init__(self, data):
+		self.data = data
+		self.sent = []
+
+	def recv(self, size):
+		chunk, self.data = self.data[:size], self.data[size:]
+		return(chunk)
+
+	def sendall(self, data):
+		self.sent.append(data)
+
+	def settimeout(self, value):
+		pass
+
+	def __enter__(self):
+		return(self)
+
+	def __exit__(self, *args):
+		return(False)
+
+
+MODERN_SSH = buildKexinitPacket(
+	['mlkem768x25519-sha256', 'sntrup761x25519-sha512', 'curve25519-sha256', 'ext-info-s', 'kex-strict-s-v00@openssh.com'],
+	['rsa-sha2-512', 'ssh-ed25519'],
+	['chacha20-poly1305@openssh.com', 'aes128-ctr', 'aes256-gcm@openssh.com'],
+	['hmac-sha2-256-etm@openssh.com'],
+)
+
+
+def testProbeSshReadsBannerAndKexinitInOneSegment(monkeypatch):
+	connection = FakeSshConnection(b'SSH-2.0-OpenSSH_10.0 Debian-1\r\n' + MODERN_SSH)
+	monkeypatch.setattr(webTLS.socket, 'create_connection', lambda *args, **kwargs: connection)
+
+	probe = webTLS.probeSsh('192.0.2.1')
+
+	assert connection.sent == [webTLS.SSH_CLIENT_BANNER]
+	assert probe['banner'] == 'SSH-2.0-OpenSSH_10.0 Debian-1'
+	# Les marqueurs d’extension ne sont pas des échanges de clés.
+	assert probe['kex_algorithms'] == ['mlkem768x25519-sha256', 'sntrup761x25519-sha512', 'curve25519-sha256']
+	assert probe['host_key_algorithms'] == ['rsa-sha2-512', 'ssh-ed25519']
+	assert probe['ciphers'] == ['chacha20-poly1305@openssh.com', 'aes128-ctr', 'aes256-gcm@openssh.com']
+
+
+@pytest.mark.parametrize('data', [
+	b'HTTP/1.1 400 Bad Request\r\n\r\n',
+	b'',
+	b'SSH-2.0-OpenSSH_9.6\r\n' + (999999).to_bytes(4, 'big'),
+	b'x' * 2000,
+])
+def testProbeSshNeedsAnSshServer(monkeypatch, data):
+	monkeypatch.setattr(webTLS.socket, 'create_connection', lambda *args, **kwargs: FakeSshConnection(data))
+
+	assert webTLS.probeSsh('192.0.2.1') is None
+
+
+def testClassifySshModernServer():
+	probe = webTLS.parseSshKexinit(MODERN_SSH[5:-8])
+	result = webTLS.classifySsh({'banner': 'SSH-2.0-OpenSSH_10.0 Debian-1', **probe})
+
+	assert result['ssh_software'] == 'OpenSSH_10.0'
+	assert result['ssh_pqc_kex_status'] == 'hybrid'
+	assert result['ssh_pqc_kex_algorithms'] == ['mlkem768x25519-sha256', 'sntrup761x25519-sha512']
+	assert result['ssh_host_key_pqc_status'] == 'classical'
+	assert result['ssh_cipher_256'] is True
+	assert result['ssh_weak_algorithms'] == []
+
+
+def testClassifySshOldServer():
+	result = webTLS.classifySsh({
+		'banner': 'SSH-2.0-OpenSSH_7.4',
+		'kex_algorithms': ['sntrup761x25519-sha512@openssh.com', 'diffie-hellman-group14-sha1'],
+		'host_key_algorithms': ['ssh-rsa', 'ssh-dss'],
+		'ciphers': ['aes128-ctr', 'aes128-cbc', 'arcfour'],
+		'macs': ['hmac-sha1', 'umac-64@openssh.com', 'hmac-sha2-256'],
+	})
+
+	# NTRU Prime est hybride mais non normalisé : statut distinct.
+	assert result['ssh_pqc_kex_status'] == 'hybrid_sntrup'
+	assert result['ssh_cipher_256'] is False
+	assert result['ssh_weak_algorithms'] == [
+		'aes128-cbc', 'arcfour', 'diffie-hellman-group14-sha1',
+		'hmac-sha1', 'ssh-dss', 'ssh-rsa', 'umac-64@openssh.com',
+	]
+
+
+def testClassifySshWithoutKexinitKeepsBanner():
+	assert webTLS.classifySsh({'banner': 'SSH-1.5-Ancien'}) == {
+		'ssh_banner': 'SSH-1.5-Ancien',
+		'ssh_software': 'Ancien',
+	}
+
+
+def testSshIsProbedOncePerAddressAndProvesThePort(monkeypatch):
+	calls = []
+
+	def fakeProbe(hostip, **kwargs):
+		calls.append(hostip)
+		return({'banner': 'SSH-2.0-OpenSSH_9.6', 'kex_algorithms': ['curve25519-sha256'],
+			'host_key_algorithms': ['ssh-ed25519'], 'ciphers': ['aes256-gcm@openssh.com'], 'macs': []}
+			if hostip == '192.0.2.1' else None)
+
+	monkeypatch.setattr(webTLS, 'probeSsh', fakeProbe)
+	webTLS.resetSshCache()
+
+	first = webTLS.analysePortEncryption({'port22': 'open'}, '192.0.2.1', 'a.example.com')
+	second = webTLS.analysePortEncryption({'port22': 'open'}, '192.0.2.1', 'b.example.com')
+	silent = webTLS.analysePortEncryption({'port22': 'open'}, '192.0.2.2', 'c.example.com')
+
+	assert calls == ['192.0.2.1', '192.0.2.2']
+	assert first == second
+	assert first['tls_port22'] == 'ssh'
+	assert first['ssh_pqc_kex_status'] == 'classical'
+	# Un port 22 qui accepte la connexion sans bannière SSH n’est pas compté SSH.
+	assert silent == {'tls_port22': None}

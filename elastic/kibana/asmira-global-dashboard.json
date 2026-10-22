@@ -2,7 +2,7 @@
   "title": "[archoad] Asmira — Surface d’exposition globale",
   "description": "",
   "time_range": {
-    "from": "now-90d",
+    "from": "now-30d/d",
     "to": "now"
   },
   "pinned_panels": [
@@ -608,7 +608,7 @@
                   ],
                   "color": {
                     "type": "color_code",
-                    "value": "#2E8B57"
+                    "value": "#54B399"
                   }
                 },
                 {
@@ -617,7 +617,7 @@
                   ],
                   "color": {
                     "type": "color_code",
-                    "value": "#BD271E"
+                    "value": "#E7664C"
                   }
                 }
               ]
@@ -659,7 +659,7 @@
                   ],
                   "color": {
                     "type": "color_code",
-                    "value": "#2E8B57"
+                    "value": "#54B399"
                   }
                 },
                 {
@@ -668,7 +668,7 @@
                   ],
                   "color": {
                     "type": "color_code",
-                    "value": "#BD271E"
+                    "value": "#E7664C"
                   }
                 }
               ]
@@ -989,7 +989,7 @@
     {
       "type": "markdown",
       "config": {
-        "content": "### Cryptographie et PQC\nL’ANSSI impose d’**associer** un algorithme post-quantique normalisé (ML-KEM, ML-DSA) à un algorithme classique. Pour l’échange de clés TLS 1.3, les groupes hybrides sont X25519MLKEM768, SecP256r1MLKEM768 et SecP384r1MLKEM1024 ; ML-KEM proposé seul n’est pas conforme. Chaque groupe est testé par une négociation réelle. Un FQDN dont toutes les adresses proposent un groupe hybride a adopté l’approche hybride, il gagne 10 points sur l’échange de clés et peut seul atteindre A+. Côté **authentification**, l’ANSSI vise aussi l’hybridation du certificat, de sa chaîne d’autorités et de la signature du handshake ; aucun standard n’existe encore et aucune autorité publique n’émet de tels certificats : ce suivi relève de la veille et n’entre pas dans la note. « Classique » signifie qu’aucun certificat post-quantique n’est présenté à un client classique : un éventuel second certificat ML-DSA, servi seulement aux clients qui le demandent en priorité, n’est pas encore sondé.",
+        "content": "### Cryptographie et PQC\nL’ANSSI impose d’**associer** un algorithme post-quantique normalisé (ML-KEM, ML-DSA) à un algorithme classique. Pour l’échange de clés TLS 1.3, les groupes hybrides sont X25519MLKEM768, SecP256r1MLKEM768 et SecP384r1MLKEM1024 ; ML-KEM proposé seul n’est pas conforme. Chaque groupe est testé par une négociation réelle. Un FQDN dont toutes les adresses proposent un groupe hybride a adopté l’approche hybride, il gagne 10 points sur l’échange de clés et peut seul atteindre A+. Côté **authentification**, l’ANSSI vise aussi l’hybridation du certificat, de sa chaîne d’autorités et de la signature du handshake ; aucun standard n’existe encore et aucune autorité publique n’émet de tels certificats : ce suivi relève de la veille et n’entre pas dans la note. « Classique » signifie qu’aucun certificat post-quantique n’est présenté à un client classique : un éventuel second certificat ML-DSA, servi seulement aux clients qui le demandent en priorité, n’est pas encore sondé. Le chiffrement symétrique n’est pas menacé par l’ordinateur quantique, mais l’ANSSI recommande d’en allonger les clés : les suites AES-128 sont classées « acceptables », AES-256 et ChaCha20 « recommandées ».",
         "hide_border": true,
         "settings": {
           "open_links_in_new_tab": true
@@ -999,7 +999,7 @@
         "x": 0,
         "y": 166,
         "w": 48,
-        "h": 7
+        "h": 8
       }
     },
     {
@@ -1024,7 +1024,7 @@
       },
       "grid": {
         "x": 0,
-        "y": 173,
+        "y": 174,
         "w": 16,
         "h": 11
       }
@@ -1072,7 +1072,7 @@
       },
       "grid": {
         "x": 16,
-        "y": 173,
+        "y": 174,
         "w": 32,
         "h": 11
       }
@@ -1099,7 +1099,7 @@
       },
       "grid": {
         "x": 0,
-        "y": 184,
+        "y": 185,
         "w": 16,
         "h": 10
       }
@@ -1146,7 +1146,7 @@
       },
       "grid": {
         "x": 16,
-        "y": 184,
+        "y": 185,
         "w": 16,
         "h": 10
       }
@@ -1179,7 +1179,7 @@
       },
       "grid": {
         "x": 32,
-        "y": 184,
+        "y": 185,
         "w": 16,
         "h": 10
       }
@@ -1187,7 +1187,7 @@
     {
       "grid": {
         "x": 0,
-        "y": 194,
+        "y": 195,
         "w": 24,
         "h": 10
       },
@@ -1212,7 +1212,7 @@
             "type": "bar_horizontal",
             "data_source": {
               "type": "esql",
-              "query": "FROM asmira-exposure-current | WHERE asmira.exposure.tls.negotiated_cipher IS NOT NULL | MV_EXPAND asmira.exposure.tls.negotiated_cipher | EVAL Suite = asmira.exposure.tls.negotiated_cipher | EVAL `Évaluation` = CASE(Suite RLIKE \".*(NULL|EXP|anon|ADH|AECDH|RC4|DES|IDEA|MD5).*\", \"Faible (RC4, 3DES, NULL…) : à désactiver\", Suite RLIKE \"TLS_(AES|CHACHA20|AKE)_.*\", \"TLS 1.3 : recommandée\", Suite RLIKE \"(ECDHE|DHE)-.*(GCM|CHACHA20|CCM).*\", \"TLS 1.2 ECDHE + AEAD (GCM, ChaCha20) : recommandée\", Suite RLIKE \"(ECDHE|DHE)-.*\", \"TLS 1.2 ECDHE sans AEAD (CBC) : à éviter\", \"Échange RSA statique, sans confidentialité persistante : à éviter\") | STATS FQDN = COUNT(*) BY Suite, `Évaluation` | SORT FQDN DESC"
+              "query": "FROM asmira-exposure-current | WHERE asmira.exposure.tls.negotiated_cipher IS NOT NULL | MV_EXPAND asmira.exposure.tls.negotiated_cipher | EVAL Suite = asmira.exposure.tls.negotiated_cipher | EVAL `Évaluation` = CASE(Suite RLIKE \".*(NULL|EXP|anon|ADH|AECDH|RC4|DES|IDEA|MD5).*\", \"Faible (RC4, 3DES, NULL…) : à désactiver\", Suite RLIKE \"TLS_(AES_256|CHACHA20)_.*\", \"TLS 1.3, AES-256 ou ChaCha20 : recommandée\", Suite RLIKE \"TLS_(AES|AKE)_.*\", \"TLS 1.3, AES-128 : acceptable (ANSSI : viser 256 bits)\", Suite RLIKE \"(ECDHE|DHE)-.*(AES256-GCM|CHACHA20).*\", \"TLS 1.2 ECDHE + AES-256-GCM ou ChaCha20 : recommandée\", Suite RLIKE \"(ECDHE|DHE)-.*(GCM|CCM).*\", \"TLS 1.2 ECDHE + AES-128 (GCM, CCM) : acceptable (ANSSI : viser 256 bits)\", Suite RLIKE \"(ECDHE|DHE)-.*\", \"TLS 1.2 ECDHE sans AEAD (CBC) : à éviter\", \"Échange RSA statique, sans confidentialité persistante : à éviter\") | STATS FQDN = COUNT(*) BY Suite, `Évaluation` | SORT FQDN DESC"
             },
             "x": {
               "column": "Suite"
@@ -1235,7 +1235,7 @@
     {
       "grid": {
         "x": 24,
-        "y": 194,
+        "y": 195,
         "w": 24,
         "h": 10
       },
@@ -1287,7 +1287,7 @@
         "title": "Bilan PQC des certificats par FQDN",
         "data_source": {
           "type": "esql",
-          "query": "FROM asmira-exposure-certificates-current | EVAL statutCertificat = CASE(MV_CONCAT(asmira.exposure.tls.certificate_pqc_status, \",\") LIKE \"*classical*\", \"classical\", MV_CONCAT(asmira.exposure.tls.certificate_pqc_status, \",\") LIKE \"*unknown*\", \"unknown\", MV_CONCAT(asmira.exposure.tls.certificate_pqc_status, \",\") LIKE \"*partial*\", \"partial\", MV_CONCAT(asmira.exposure.tls.certificate_pqc_status, \",\") LIKE \"*pqc*\", \"pqc\", MV_CONCAT(asmira.exposure.tls.certificate_pqc_status, \",\") LIKE \"*hybrid*\", \"hybrid\", NULL), statutChaine = CASE(MV_CONCAT(asmira.exposure.tls.certificate_chain_pqc_status, \",\") LIKE \"*classical*\", \"classical\", MV_CONCAT(asmira.exposure.tls.certificate_chain_pqc_status, \",\") LIKE \"*unknown*\", \"unknown\", MV_CONCAT(asmira.exposure.tls.certificate_chain_pqc_status, \",\") LIKE \"*partial*\", \"partial\", MV_CONCAT(asmira.exposure.tls.certificate_chain_pqc_status, \",\") LIKE \"*pqc*\", \"pqc\", MV_CONCAT(asmira.exposure.tls.certificate_chain_pqc_status, \",\") LIKE \"*hybrid*\", \"hybrid\", NULL), statutSignature = CASE(MV_CONCAT(asmira.exposure.tls.handshake_signature_pqc_status, \",\") LIKE \"*classical*\", \"classical\", MV_CONCAT(asmira.exposure.tls.handshake_signature_pqc_status, \",\") LIKE \"*unknown*\", \"unknown\", MV_CONCAT(asmira.exposure.tls.handshake_signature_pqc_status, \",\") LIKE \"*partial*\", \"partial\", MV_CONCAT(asmira.exposure.tls.handshake_signature_pqc_status, \",\") LIKE \"*pqc*\", \"pqc\", MV_CONCAT(asmira.exposure.tls.handshake_signature_pqc_status, \",\") LIKE \"*hybrid*\", \"hybrid\", NULL), typeCle = MV_MIN(asmira.exposure.tls.certificate_key_type), taille = COALESCE(TO_STRING(MV_MAX(asmira.exposure.tls.certificate_key_size)), \"?\") | EVAL `Clé du certificat` = CASE(asmira.exposure.tls.certificate_pqc_algorithms IS NOT NULL, MV_CONCAT(asmira.exposure.tls.certificate_pqc_algorithms, \" + \"), typeCle == \"RSAPublicKey\", CONCAT(\"RSA \", taille), typeCle == \"EllipticCurvePublicKey\", CONCAT(\"ECDSA P-\", taille), typeCle == \"DSAPublicKey\", CONCAT(\"DSA \", taille), typeCle == \"Ed25519PublicKey\", \"Ed25519\", typeCle == \"Ed448PublicKey\", \"Ed448\", typeCle IS NULL, \"Clé non lue\", typeCle), Certificat = CASE(statutCertificat == \"classical\", \"Classique\", statutCertificat == \"hybrid\", \"Hybride\", statutCertificat == \"pqc\", \"PQ seul, non hybride\", statutCertificat == \"partial\", \"Partiel\", statutCertificat == \"unknown\", \"Indéterminé\", \"Indéterminé\"), `Chaîne` = CASE(statutChaine == \"classical\", \"Classique\", statutChaine == \"hybrid\", \"Hybride\", statutChaine == \"pqc\", \"PQ seul, non hybride\", statutChaine == \"partial\", \"Partiel\", statutChaine == \"unknown\", \"Indéterminé\", \"Non relevée\"), `Signature du handshake` = CONCAT(COALESCE(MV_CONCAT(asmira.exposure.tls.handshake_signature_type, \", \"), \"non relevée\"), CASE(statutSignature == \"classical\", \" (classique)\", statutSignature == \"hybrid\", \" (hybride)\", statutSignature == \"pqc\", \" (PQ seul)\", \"\")), `Échange de clés` = CASE(asmira.exposure.tls.pqc_kex_status == \"hybrid\", \"Hybride ML-KEM\", asmira.exposure.tls.pqc_kex_status == \"pure\", \"ML-KEM seul\", asmira.exposure.tls.pqc_kex_status == \"partial\", \"ML-KEM sur une partie des IP\", asmira.exposure.tls.pqc_kex_status == \"classical\", \"Classique\", asmira.exposure.tls.pqc_kex_status == \"no_tls13\", \"Sans TLS 1.3\", \"Indéterminé\"), `Hybridation ANSSI` = CASE(asmira.exposure.tls.pqc_hybrid_level == \"complete\", \"Échange de clés et signature\", asmira.exposure.tls.pqc_hybrid_level == \"key_exchange\", \"Échange de clés seul\", asmira.exposure.tls.pqc_hybrid_level == \"signature\", \"Signature seule\", \"Aucune\"), Rang = CASE(asmira.exposure.tls.pqc_hybrid_level == \"complete\", 0, asmira.exposure.tls.pqc_hybrid_level == \"signature\", 1, asmira.exposure.tls.pqc_hybrid_level == \"key_exchange\", 2, 3) | RENAME server.domain AS FQDN, server.registered_domain AS Domaine, asmira.exposure.ip_count AS Adresses | SORT Rang ASC, FQDN ASC | KEEP FQDN, Domaine, `Clé du certificat`, Certificat, `Chaîne`, `Signature du handshake`, `Échange de clés`, `Hybridation ANSSI`, Adresses | LIMIT 1000"
+          "query": "FROM asmira-exposure-certificates-current | EVAL statutCertificat = CASE(MV_CONCAT(asmira.exposure.tls.certificate_pqc_status, \",\") LIKE \"*classical*\", \"classical\", MV_CONCAT(asmira.exposure.tls.certificate_pqc_status, \",\") LIKE \"*unknown*\", \"unknown\", MV_CONCAT(asmira.exposure.tls.certificate_pqc_status, \",\") LIKE \"*partial*\", \"partial\", MV_CONCAT(asmira.exposure.tls.certificate_pqc_status, \",\") LIKE \"*pqc*\", \"pqc\", MV_CONCAT(asmira.exposure.tls.certificate_pqc_status, \",\") LIKE \"*hybrid*\", \"hybrid\", NULL), statutChaine = CASE(MV_CONCAT(asmira.exposure.tls.certificate_chain_pqc_status, \",\") LIKE \"*classical*\", \"classical\", MV_CONCAT(asmira.exposure.tls.certificate_chain_pqc_status, \",\") LIKE \"*unknown*\", \"unknown\", MV_CONCAT(asmira.exposure.tls.certificate_chain_pqc_status, \",\") LIKE \"*partial*\", \"partial\", MV_CONCAT(asmira.exposure.tls.certificate_chain_pqc_status, \",\") LIKE \"*pqc*\", \"pqc\", MV_CONCAT(asmira.exposure.tls.certificate_chain_pqc_status, \",\") LIKE \"*hybrid*\", \"hybrid\", NULL), statutSignature = CASE(MV_CONCAT(asmira.exposure.tls.handshake_signature_pqc_status, \",\") LIKE \"*classical*\", \"classical\", MV_CONCAT(asmira.exposure.tls.handshake_signature_pqc_status, \",\") LIKE \"*unknown*\", \"unknown\", MV_CONCAT(asmira.exposure.tls.handshake_signature_pqc_status, \",\") LIKE \"*partial*\", \"partial\", MV_CONCAT(asmira.exposure.tls.handshake_signature_pqc_status, \",\") LIKE \"*pqc*\", \"pqc\", MV_CONCAT(asmira.exposure.tls.handshake_signature_pqc_status, \",\") LIKE \"*hybrid*\", \"hybrid\", NULL), typeCle = MV_MIN(asmira.exposure.tls.certificate_key_type), taille = COALESCE(TO_STRING(MV_MAX(asmira.exposure.tls.certificate_key_size)), \"?\") | EVAL `Clé du certificat` = CASE(asmira.exposure.tls.certificate_pqc_algorithms IS NOT NULL, MV_CONCAT(asmira.exposure.tls.certificate_pqc_algorithms, \" + \"), typeCle == \"RSAPublicKey\", CONCAT(\"RSA \", taille), typeCle == \"EllipticCurvePublicKey\", CONCAT(\"ECDSA P-\", taille), typeCle == \"DSAPublicKey\", CONCAT(\"DSA \", taille), typeCle == \"Ed25519PublicKey\", \"Ed25519\", typeCle == \"Ed448PublicKey\", \"Ed448\", typeCle IS NULL, \"Clé non lue\", typeCle), Certificat = CASE(statutCertificat == \"classical\", \"Classique\", statutCertificat == \"hybrid\", \"Hybride\", statutCertificat == \"pqc\", \"PQ seul, non hybride\", statutCertificat == \"partial\", \"Partiel\", statutCertificat == \"unknown\", \"Indéterminé\", \"Indéterminé\"), `Chaîne` = CASE(statutChaine == \"classical\", \"Classique\", statutChaine == \"hybrid\", \"Hybride\", statutChaine == \"pqc\", \"PQ seul, non hybride\", statutChaine == \"partial\", \"Partiel\", statutChaine == \"unknown\", \"Indéterminé\", \"Non relevée\"), `Signature du handshake` = CONCAT(COALESCE(MV_CONCAT(asmira.exposure.tls.handshake_signature_type, \", \"), \"non relevée\"), CASE(statutSignature == \"classical\", \" (classique)\", statutSignature == \"hybrid\", \" (hybride)\", statutSignature == \"pqc\", \" (PQ seul)\", \"\")), `Échange de clés` = CASE(asmira.exposure.tls.pqc_kex_status == \"hybrid\", \"Hybride ML-KEM\", asmira.exposure.tls.pqc_kex_status == \"pure\", \"ML-KEM seul\", asmira.exposure.tls.pqc_kex_status == \"partial\", \"ML-KEM sur une partie des IP\", asmira.exposure.tls.pqc_kex_status == \"classical\", \"Classique\", asmira.exposure.tls.pqc_kex_status == \"no_tls13\", \"Sans TLS 1.3\", \"Indéterminé\"), `Hybridation ANSSI` = CASE(asmira.exposure.tls.pqc_hybrid_level == \"complete\", \"Échange de clés et signature\", asmira.exposure.tls.pqc_hybrid_level == \"key_exchange\", \"Échange de clés seul\", asmira.exposure.tls.pqc_hybrid_level == \"signature\", \"Signature seule\", \"Aucune\"), Rang = CASE(asmira.exposure.tls.pqc_hybrid_level == \"complete\", 0, asmira.exposure.tls.pqc_hybrid_level == \"signature\", 1, asmira.exposure.tls.pqc_hybrid_level == \"key_exchange\", 2, 3) | EVAL p25 = CASE(MV_CONCAT(`asmira.exposure.port.25.certificate_pqc`, \",\") LIKE \"*classical*\", \"25 classique\", MV_CONCAT(`asmira.exposure.port.25.certificate_pqc`, \",\") LIKE \"*unknown*\", \"25 indéterminé\", MV_CONCAT(`asmira.exposure.port.25.certificate_pqc`, \",\") LIKE \"*partial*\", \"25 partiel\", MV_CONCAT(`asmira.exposure.port.25.certificate_pqc`, \",\") LIKE \"*pqc*\", \"25 PQ seul\", MV_CONCAT(`asmira.exposure.port.25.certificate_pqc`, \",\") LIKE \"*hybrid*\", \"25 hybride\", NULL), p465 = CASE(MV_CONCAT(`asmira.exposure.port.465.certificate_pqc`, \",\") LIKE \"*classical*\", \"465 classique\", MV_CONCAT(`asmira.exposure.port.465.certificate_pqc`, \",\") LIKE \"*unknown*\", \"465 indéterminé\", MV_CONCAT(`asmira.exposure.port.465.certificate_pqc`, \",\") LIKE \"*partial*\", \"465 partiel\", MV_CONCAT(`asmira.exposure.port.465.certificate_pqc`, \",\") LIKE \"*pqc*\", \"465 PQ seul\", MV_CONCAT(`asmira.exposure.port.465.certificate_pqc`, \",\") LIKE \"*hybrid*\", \"465 hybride\", NULL), p587 = CASE(MV_CONCAT(`asmira.exposure.port.587.certificate_pqc`, \",\") LIKE \"*classical*\", \"587 classique\", MV_CONCAT(`asmira.exposure.port.587.certificate_pqc`, \",\") LIKE \"*unknown*\", \"587 indéterminé\", MV_CONCAT(`asmira.exposure.port.587.certificate_pqc`, \",\") LIKE \"*partial*\", \"587 partiel\", MV_CONCAT(`asmira.exposure.port.587.certificate_pqc`, \",\") LIKE \"*pqc*\", \"587 PQ seul\", MV_CONCAT(`asmira.exposure.port.587.certificate_pqc`, \",\") LIKE \"*hybrid*\", \"587 hybride\", NULL), p993 = CASE(MV_CONCAT(`asmira.exposure.port.993.certificate_pqc`, \",\") LIKE \"*classical*\", \"993 classique\", MV_CONCAT(`asmira.exposure.port.993.certificate_pqc`, \",\") LIKE \"*unknown*\", \"993 indéterminé\", MV_CONCAT(`asmira.exposure.port.993.certificate_pqc`, \",\") LIKE \"*partial*\", \"993 partiel\", MV_CONCAT(`asmira.exposure.port.993.certificate_pqc`, \",\") LIKE \"*pqc*\", \"993 PQ seul\", MV_CONCAT(`asmira.exposure.port.993.certificate_pqc`, \",\") LIKE \"*hybrid*\", \"993 hybride\", NULL), p995 = CASE(MV_CONCAT(`asmira.exposure.port.995.certificate_pqc`, \",\") LIKE \"*classical*\", \"995 classique\", MV_CONCAT(`asmira.exposure.port.995.certificate_pqc`, \",\") LIKE \"*unknown*\", \"995 indéterminé\", MV_CONCAT(`asmira.exposure.port.995.certificate_pqc`, \",\") LIKE \"*partial*\", \"995 partiel\", MV_CONCAT(`asmira.exposure.port.995.certificate_pqc`, \",\") LIKE \"*pqc*\", \"995 PQ seul\", MV_CONCAT(`asmira.exposure.port.995.certificate_pqc`, \",\") LIKE \"*hybrid*\", \"995 hybride\", NULL), p8080 = CASE(MV_CONCAT(`asmira.exposure.port.8080.certificate_pqc`, \",\") LIKE \"*classical*\", \"8080 classique\", MV_CONCAT(`asmira.exposure.port.8080.certificate_pqc`, \",\") LIKE \"*unknown*\", \"8080 indéterminé\", MV_CONCAT(`asmira.exposure.port.8080.certificate_pqc`, \",\") LIKE \"*partial*\", \"8080 partiel\", MV_CONCAT(`asmira.exposure.port.8080.certificate_pqc`, \",\") LIKE \"*pqc*\", \"8080 PQ seul\", MV_CONCAT(`asmira.exposure.port.8080.certificate_pqc`, \",\") LIKE \"*hybrid*\", \"8080 hybride\", NULL), p8443 = CASE(MV_CONCAT(`asmira.exposure.port.8443.certificate_pqc`, \",\") LIKE \"*classical*\", \"8443 classique\", MV_CONCAT(`asmira.exposure.port.8443.certificate_pqc`, \",\") LIKE \"*unknown*\", \"8443 indéterminé\", MV_CONCAT(`asmira.exposure.port.8443.certificate_pqc`, \",\") LIKE \"*partial*\", \"8443 partiel\", MV_CONCAT(`asmira.exposure.port.8443.certificate_pqc`, \",\") LIKE \"*pqc*\", \"8443 PQ seul\", MV_CONCAT(`asmira.exposure.port.8443.certificate_pqc`, \",\") LIKE \"*hybrid*\", \"8443 hybride\", NULL) | EVAL `Autres ports` = COALESCE(MV_CONCAT(MV_APPEND(MV_APPEND(MV_APPEND(MV_APPEND(MV_APPEND(MV_APPEND(p25, p465), p587), p993), p995), p8080), p8443), \", \"), \"—\") | RENAME server.domain AS FQDN, server.registered_domain AS Domaine, asmira.exposure.ip_count AS Adresses | SORT Rang ASC, FQDN ASC | KEEP FQDN, Domaine, `Clé du certificat`, Certificat, `Chaîne`, `Signature du handshake`, `Échange de clés`, `Hybridation ANSSI`, `Autres ports`, Adresses | LIMIT 1000"
         },
         "rows": [
           {
@@ -1313,6 +1313,9 @@
           },
           {
             "column": "Hybridation ANSSI"
+          },
+          {
+            "column": "Autres ports"
           }
         ],
         "metrics": [
@@ -1323,7 +1326,7 @@
       },
       "grid": {
         "x": 0,
-        "y": 204,
+        "y": 205,
         "w": 48,
         "h": 14
       }
@@ -1331,7 +1334,7 @@
     {
       "type": "markdown",
       "config": {
-        "content": "### Surface d’exposition\nPorts sondés : 22, 25, 80, 443, 465, 587, 993, 995, 3389, 8080 et 8443. Pour chaque port ouvert, Asmira vérifie le chiffrement : TLS direct (443, 465, 993, 995, 8080, 8443), STARTTLS (25, 587), CredSSP/TLS ou chiffrement RDP natif (3389). Le port 22 est classé SSH. Un port n’est classé en clair que si le service a répondu sans chiffrement. Un port de CDN muet reste indéterminé. Seul le port 80 est du HTTP en clair par nature et ne compte pas comme service non chiffré. Un 8080 en clair n’est compté que s’il ne redirige pas vers HTTPS (**Redirection HTTPS**), car HSTS conserve le port.",
+        "content": "### SSH\nConcernant SSH et la PQC, l'ANSSI priorise l’hybridation de l’échange de clés, puis de l’authentification. Le protocole **Hybride ML-KEM** (`mlkem768x25519-sha256`) est la cible, **NTRU Prime** (`sntrup761x25519`) est hybride mais non normalisé. Sans échange hybride, le constat est `SSH_NO_PQC_KEX`. `SSH_WEAK_ALGORITHMS` signale les algorithmes obsolètes encore proposés (SHA-1, CBC, `ssh-dss`…).",
         "hide_border": true,
         "settings": {
           "open_links_in_new_tab": true
@@ -1339,7 +1342,161 @@
       },
       "grid": {
         "x": 0,
-        "y": 218,
+        "y": 219,
+        "w": 48,
+        "h": 5
+      }
+    },
+    {
+      "type": "vis",
+      "config": {
+        "type": "xy",
+        "title": "Échange de clés post-quantique SSH",
+        "axis": {
+          "x": {
+            "title": {
+              "visible": false
+            }
+          },
+          "y": {
+            "title": {
+              "visible": false
+            }
+          }
+        },
+        "layers": [
+          {
+            "type": "bar_horizontal",
+            "data_source": {
+              "type": "esql",
+              "query": "FROM asmira-exposure-current | WHERE asmira.exposure.ssh.pqc_kex_status IS NOT NULL | EVAL `Échange de clés` = CASE(MV_CONCAT(asmira.exposure.ssh.pqc_kex_status, \",\") LIKE \"*classical*\", \"Classique : aucun échange de clés post-quantique\", MV_CONCAT(asmira.exposure.ssh.pqc_kex_status, \",\") LIKE \"*pure*\", \"ML-KEM seul (non hybride)\", MV_CONCAT(asmira.exposure.ssh.pqc_kex_status, \",\") LIKE \"*hybrid_sntrup*\", \"Hybride NTRU Prime (non normalisé)\", MV_CONCAT(asmira.exposure.ssh.pqc_kex_status, \",\") LIKE \"*hybrid*\", \"Hybride ML-KEM (recommandé par l’ANSSI)\", \"Indéterminé\") | MV_EXPAND asmira.exposure.ssh.ip | STATS `Adresses IP` = COUNT_DISTINCT(asmira.exposure.ssh.ip), FQDN = COUNT_DISTINCT(server.domain) BY `Échange de clés` | SORT `Adresses IP` DESC"
+            },
+            "x": {
+              "column": "Échange de clés"
+            },
+            "y": [
+              {
+                "column": "Adresses IP"
+              },
+              {
+                "column": "FQDN"
+              }
+            ]
+          }
+        ],
+        "legend": {
+          "visibility": "visible"
+        }
+      },
+      "grid": {
+        "x": 0,
+        "y": 224,
+        "w": 24,
+        "h": 10
+      }
+    },
+    {
+      "type": "vis",
+      "config": {
+        "type": "xy",
+        "title": "Logiciels SSH exposés",
+        "axis": {
+          "x": {
+            "title": {
+              "visible": false
+            }
+          },
+          "y": {
+            "title": {
+              "visible": false
+            }
+          }
+        },
+        "layers": [
+          {
+            "type": "bar_horizontal",
+            "data_source": {
+              "type": "esql",
+              "query": "FROM asmira-exposure-current | WHERE asmira.exposure.ssh.software IS NOT NULL | MV_EXPAND asmira.exposure.ssh.software | MV_EXPAND asmira.exposure.ssh.ip | STATS `Adresses IP` = COUNT_DISTINCT(asmira.exposure.ssh.ip) BY Logiciel = asmira.exposure.ssh.software | SORT `Adresses IP` DESC | LIMIT 15"
+            },
+            "x": {
+              "column": "Logiciel"
+            },
+            "y": [
+              {
+                "column": "Adresses IP"
+              }
+            ]
+          }
+        ]
+      },
+      "grid": {
+        "x": 24,
+        "y": 224,
+        "w": 24,
+        "h": 10
+      }
+    },
+    {
+      "type": "vis",
+      "config": {
+        "type": "data_table",
+        "title": "Serveurs SSH exposés",
+        "data_source": {
+          "type": "esql",
+          "query": "FROM asmira-exposure-current | WHERE asmira.exposure.ssh.ip IS NOT NULL | MV_EXPAND asmira.exposure.ssh.ip | STATS FQDN = COUNT_DISTINCT(server.domain), noms = VALUES(server.domain), logiciel = VALUES(asmira.exposure.ssh.software), kex = VALUES(asmira.exposure.ssh.pqc_kex_status), cleHote = VALUES(asmira.exposure.ssh.host_key_algorithms), cle256 = VALUES(asmira.exposure.ssh.cipher_256), obsoletes = VALUES(asmira.exposure.ssh.weak_algorithms), domaine = VALUES(server.registered_domain) BY Adresse = asmira.exposure.ssh.ip | EVAL `Échange de clés` = CASE(MV_CONCAT(kex, \",\") LIKE \"*classical*\", \"Classique : aucun échange de clés post-quantique\", MV_CONCAT(kex, \",\") LIKE \"*pure*\", \"ML-KEM seul (non hybride)\", MV_CONCAT(kex, \",\") LIKE \"*hybrid_sntrup*\", \"Hybride NTRU Prime (non normalisé)\", MV_CONCAT(kex, \",\") LIKE \"*hybrid*\", \"Hybride ML-KEM (recommandé par l’ANSSI)\", \"Indéterminé\"), Rang = CASE(MV_CONCAT(kex, \",\") LIKE \"*classical*\", 0, MV_CONCAT(kex, \",\") LIKE \"*pure*\", 1, MV_CONCAT(kex, \",\") LIKE \"*sntrup*\", 2, 3), Logiciel = MV_CONCAT(logiciel, \", \"), Domaine = MV_CONCAT(domaine, \", \"), `Noms (extrait)` = MV_CONCAT(MV_SLICE(MV_SORT(noms), 0, 4), \", \"), `Clé d’hôte` = MV_CONCAT(cleHote, \", \"), `Chiffrement 256 bits` = CASE(MV_MIN(cle256) == true, \"Oui\", MV_MAX(cle256) == true, \"Selon l’adresse\", \"Non\"), `Algorithmes obsolètes` = COALESCE(MV_CONCAT(obsoletes, \", \"), \"aucun\") | SORT Rang ASC, FQDN DESC | KEEP Adresse, Domaine, `Noms (extrait)`, Logiciel, `Échange de clés`, `Clé d’hôte`, `Chiffrement 256 bits`, `Algorithmes obsolètes`, FQDN | LIMIT 500"
+        },
+        "rows": [
+          {
+            "column": "Adresse"
+          },
+          {
+            "column": "Domaine"
+          },
+          {
+            "column": "Noms (extrait)"
+          },
+          {
+            "column": "Logiciel"
+          },
+          {
+            "column": "Échange de clés"
+          },
+          {
+            "column": "Clé d’hôte"
+          },
+          {
+            "column": "Chiffrement 256 bits"
+          },
+          {
+            "column": "Algorithmes obsolètes"
+          }
+        ],
+        "metrics": [
+          {
+            "column": "FQDN"
+          }
+        ]
+      },
+      "grid": {
+        "x": 0,
+        "y": 234,
+        "w": 48,
+        "h": 13
+      }
+    },
+    {
+      "type": "markdown",
+      "config": {
+        "content": "### Surface d’exposition\nPorts sondés : 22, 25, 80, 443, 465, 587, 993, 995, 3389, 8080 et 8443. Pour chaque port ouvert, Asmira vérifie le chiffrement : TLS direct (443, 465, 993, 995, 8080, 8443), STARTTLS (25, 587), CredSSP/TLS ou chiffrement RDP natif (3389). Le port 22 n’est classé SSH que si le serveur présente une bannière SSH (voir la section SSH). Un port n’est classé en clair que si le service a répondu sans chiffrement. Un port de CDN muet reste indéterminé. Seul le port 80 est du HTTP en clair par nature et ne compte pas comme service non chiffré. Un 8080 en clair n’est compté que s’il ne redirige pas vers HTTPS (**Redirection HTTPS**), car HSTS conserve le port.",
+        "hide_border": true,
+        "settings": {
+          "open_links_in_new_tab": true
+        }
+      },
+      "grid": {
+        "x": 0,
+        "y": 247,
         "w": 48,
         "h": 6
       }
@@ -1381,7 +1538,7 @@
       },
       "grid": {
         "x": 0,
-        "y": 224,
+        "y": 253,
         "w": 24,
         "h": 11
       }
@@ -1429,7 +1586,7 @@
       },
       "grid": {
         "x": 24,
-        "y": 224,
+        "y": 253,
         "w": 24,
         "h": 11
       }
@@ -1465,7 +1622,7 @@
       },
       "grid": {
         "x": 0,
-        "y": 235,
+        "y": 264,
         "w": 48,
         "h": 12
       }
@@ -1473,7 +1630,7 @@
     {
       "grid": {
         "x": 0,
-        "y": 247,
+        "y": 276,
         "w": 24,
         "h": 10
       },
@@ -1520,7 +1677,7 @@
     {
       "grid": {
         "x": 24,
-        "y": 247,
+        "y": 276,
         "w": 24,
         "h": 10
       },
@@ -1567,7 +1724,7 @@
     {
       "grid": {
         "x": 0,
-        "y": 257,
+        "y": 286,
         "w": 48,
         "h": 10
       },
@@ -1624,7 +1781,7 @@
     {
       "grid": {
         "x": 0,
-        "y": 267,
+        "y": 296,
         "w": 48,
         "h": 4
       },
@@ -1640,7 +1797,7 @@
     {
       "grid": {
         "x": 0,
-        "y": 271,
+        "y": 300,
         "w": 12,
         "h": 10
       },
@@ -1666,7 +1823,7 @@
     {
       "grid": {
         "x": 12,
-        "y": 271,
+        "y": 300,
         "w": 12,
         "h": 10
       },
@@ -1699,7 +1856,7 @@
     {
       "grid": {
         "x": 24,
-        "y": 271,
+        "y": 300,
         "w": 12,
         "h": 10
       },
@@ -1751,7 +1908,7 @@
     {
       "grid": {
         "x": 36,
-        "y": 271,
+        "y": 300,
         "w": 12,
         "h": 10
       },
@@ -1803,7 +1960,7 @@
     {
       "grid": {
         "x": 0,
-        "y": 281,
+        "y": 310,
         "w": 48,
         "h": 10
       },
@@ -1859,7 +2016,7 @@
       },
       "grid": {
         "x": 0,
-        "y": 291,
+        "y": 320,
         "w": 48,
         "h": 4
       }

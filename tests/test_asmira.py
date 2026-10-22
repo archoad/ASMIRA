@@ -510,6 +510,44 @@ def testPqcHybridLevel(kex, certificate, chain, level):
 	assert asmira.pqcHybridLevel(kex, certificate, chain) == level
 
 
+@pytest.mark.parametrize('kexStatus, weak, findings', [
+	('hybrid', [], set()),
+	# NTRU Prime : hybride non normalisé, sans constat d’absence de PQC.
+	('hybrid_sntrup', [], set()),
+	('classical', ['ssh-rsa'], {'SSH_NO_PQC_KEX', 'SSH_WEAK_ALGORITHMS'}),
+])
+def testExposureEventsCarrySshAndFindings(kexStatus, weak, findings):
+	event = asmira.buildExposureEvents([gradedItem(
+		port22='open',
+		tls_port22='ssh',
+		ssh_banner='SSH-2.0-OpenSSH_9.6',
+		ssh_software='OpenSSH_9.6',
+		ssh_kex_algorithms=['curve25519-sha256'],
+		ssh_host_key_algorithms=['ssh-ed25519'],
+		ssh_ciphers=['aes256-gcm@openssh.com'],
+		ssh_macs=['hmac-sha2-256'],
+		ssh_pqc_kex_status=kexStatus,
+		ssh_pqc_kex_algorithms=[],
+		ssh_host_key_pqc_status='classical',
+		ssh_cipher_256=True,
+		ssh_weak_algorithms=weak,
+	)], '20260731T200000Z-12345678')[0]
+	exposure = event['asmira']['exposure']
+
+	assert exposure['ssh']['ip'] == ['192.0.2.10']
+	assert exposure['ssh']['software'] == ['OpenSSH_9.6']
+	assert exposure['ssh']['pqc_kex_status'] == [kexStatus]
+	assert exposure['ssh']['cipher_256'] == [True]
+	sshFindings = {code for code in exposure['tls'].get('findings', []) if code.startswith('SSH_')}
+	assert sshFindings == findings
+
+
+def testExposureEventsWithoutSshHaveNoSshBlock():
+	event = asmira.buildExposureEvents([gradedItem()], '20260731T200000Z-12345678')[0]
+
+	assert 'ssh' not in event['asmira']['exposure']
+
+
 def testExposureEventsCarryChainHandshakeAndPortPqcWithoutPem():
 	event = asmira.buildExposureEvents([gradedItem(
 		certificate_pem='-----BEGIN CERTIFICATE-----\nfeuille\n-----END CERTIFICATE-----',
@@ -948,7 +986,11 @@ def testCleanExportsOnlyRemovesManagedExpiredFiles(tmp_path):
 	assert unmanaged.exists()
 
 
-def testRunnerWritesThreeElasticExports(monkeypatch, tmp_path):
+@pytest.mark.parametrize('maxEndpoints, purged', [(None, True), (5, False)])
+def testRunnerWritesThreeElasticExports(monkeypatch, tmp_path, maxEndpoints, purged):
+	oldRun = tmp_path / 'runs' / '20260724T200000Z-aaaaaaaa'
+	oldRun.mkdir(parents=True)
+	(oldRun / '20260724T200000Z-aaaaaaaa_hosts_analyse.json').write_text('[]')
 	configFile = tmp_path / 'asmira.conf'
 	configFile.write_text(f'''
 [targets]
@@ -1035,9 +1077,15 @@ retention_days = 14
 	monkeypatch.setattr(asmira.webTLS, 'testTools', lambda: None)
 	monkeypatch.setattr(asmira.webTLS, 'tlsCartography', fakeExposure)
 
-	result = asmira.run(config, runId='20260731T200000Z-12345678')
+	result = asmira.run(
+		config,
+		runId='20260731T200000Z-12345678',
+		maxEndpoints=maxEndpoints,
+	)
 
 	assert result['status'] == 'success'
+	# Un run plafonné garde l’analyse complète précédente.
+	assert oldRun.exists() is not purged
 	exportDir = tmp_path / 'export'
 	assert len(list(exportDir.glob('asmira_discovery_*.ndjson'))) == 1
 	assert len(list(exportDir.glob('asmira_exposure_*.ndjson'))) == 1
@@ -1048,6 +1096,32 @@ retention_days = 14
 	assert runEvent['asmira']['run']['counts']['fqdns'] == 1
 	report = (tmp_path / 'runs' / '20260731T200000Z-12345678' / '20260731T200000Z-12345678_report.html')
 	assert '<code>20260731T200000Z-12345678</code>' in report.read_text(encoding='utf-8')
+
+
+def testCleanRunsKeepsOnlyCurrentRunWithoutCheckpoint(tmp_path):
+	runsDir = tmp_path / 'runs'
+	current = runsDir / '20261022T150000Z-12345678'
+	current.mkdir(parents=True)
+	(current / '20261022T150000Z-12345678_hosts_analyse.json').write_text('[]')
+	(current / '20261022T150000Z-12345678_hosts_analyse.checkpoint.json').write_text('[]')
+	(current / '20261022T150000Z-12345678_report.html').write_text('bilan')
+	for runId in ('20261019T180259Z-6cb45b2b', '20261012T180113Z-7073d2d3'):
+		(runsDir / runId / 'txtdns').mkdir(parents=True)
+	# Ce qui ne ressemble pas à un run n’est jamais touché.
+	(runsDir / 'notes').mkdir()
+	(runsDir / 'lisez-moi.txt').write_text('garder')
+
+	asmira.cleanRuns(runsDir, '20261022T150000Z-12345678')
+
+	assert sorted(path.name for path in runsDir.iterdir()) == [
+		'20261022T150000Z-12345678',
+		'lisez-moi.txt',
+		'notes',
+	]
+	assert sorted(path.name for path in current.iterdir()) == [
+		'20261022T150000Z-12345678_hosts_analyse.json',
+		'20261022T150000Z-12345678_report.html',
+	]
 
 
 @pytest.mark.parametrize('writer, payload', [

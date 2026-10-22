@@ -42,6 +42,8 @@ graphs = false
 xlsx = false
 
 [storage]
+# Seul le dernier run est conservé : un run réussi sans max_endpoints supprime
+# les répertoires des runs précédents et son propre checkpoint.
 runs_dir = /var/lib/asmira/runs
 export_dir = /var/lib/asmira/export
 pictures_dir = /var/lib/asmira/pictures

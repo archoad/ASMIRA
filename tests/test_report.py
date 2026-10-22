@@ -292,3 +292,27 @@ def testEmailFailureDoesNotFailTheRun(tmp_path, monkeypatch, capsys):
 	assert sent is False
 	assert reportFile.read_text(encoding='utf-8').startswith('<!doctype html>')
 	assert 'bilan non envoyé par e-mail' in capsys.readouterr().err
+
+
+def testSshServersAreCountedPerAddressWithWeakestStatus():
+	def sshEvent(name, addresses, statuses, weak=()):
+		return({
+			'server': {'domain': name, 'registered_domain': 'example.com'},
+			'asmira': {'exposure': {'present': True, 'ssh': {
+				'ip': list(addresses),
+				'pqc_kex_status': list(statuses),
+				'weak_algorithms': list(weak),
+			}, 'tls': {}}},
+		})
+
+	result = asmiraReport.analyseSsh([
+		sshEvent('a.example.com', ['192.0.2.1'], ['hybrid']),
+		# Même machine vue par un autre nom : comptée une fois.
+		sshEvent('b.example.com', ['192.0.2.1'], ['hybrid']),
+		sshEvent('c.example.com', ['192.0.2.2'], ['hybrid_sntrup'], ['ssh-rsa']),
+		sshEvent('d.example.com', ['192.0.2.3'], ['classical']),
+		sshEvent('e.example.com', ['192.0.2.3'], ['hybrid']),
+	])
+
+	assert result['kex'] == {'hybrid': 1, 'hybrid_sntrup': 1, 'classical': 1}
+	assert result['weak'] == 1

@@ -1624,6 +1624,177 @@ def httpRedirectsToHttps(hostip, host, port, timeout=None):
 	return(parseHttpRedirect(response[:HTTP_MAX_HEADER]) if response else None)
 
 
+# Sonde SSH (fiche ANSSI « Transition post-quantique de SSHv2 ») : le serveur
+# envoie en clair, avant toute authentification, sa bannière puis la liste de
+# ses algorithmes (SSH_MSG_KEXINIT, RFC 4253 § 7.1). Bornes RFC 4253 § 4.2 et 6.1.
+SSH_MAX_LINE = 255
+SSH_MAX_BANNER_LINES = 20
+SSH_MAX_PACKET = 35000
+SSH_MSG_KEXINIT = 20
+SSH_CLIENT_BANNER = b'SSH-2.0-asmira\r\n'
+# Échanges de clés hybrides ML-KEM (OpenSSH ≥ 9.9, par défaut depuis 10.0, et
+# draft-ietf-sshm-mlkem-hybrid-kex) ; NTRU Prime est hybride mais non normalisé.
+SSH_HYBRID_MLKEM_KEX = ('mlkem768x25519-sha256', 'mlkem768nistp256-sha256', 'mlkem1024nistp384-sha384')
+SSH_HYBRID_SNTRUP_KEX = ('sntrup761x25519-sha512', 'sntrup761x25519-sha512@openssh.com')
+# Marqueurs d’extension annoncés dans la liste des échanges de clés.
+SSH_KEX_MARKERS = re.compile(r'^(ext-info-[cs]|kex-strict-[cs]-v00@openssh\.com)$')
+SSH_WEAK_ALGORITHMS = re.compile(
+	r'^(diffie-hellman-group1-sha1|diffie-hellman-group14-sha1|diffie-hellman-group-exchange-sha1'
+	r'|ssh-dss.*|ssh-rsa|ssh-rsa-cert-v01@openssh\.com|arcfour.*|3des.*|blowfish.*|cast128.*'
+	r'|.*-cbc(@.*)?|hmac-md5.*|hmac-sha1.*|umac-64.*|hmac-ripemd160.*|none)$'
+)
+sshResults = {}
+sshLocks = {}
+sshLocksGuard = threading.Lock()
+
+
+class SshReader:
+	"""Lecture tamponnée d’une connexion SSH avant une échéance absolue : la
+	bannière et le paquet KEXINIT peuvent arriver dans le même segment."""
+
+	def __init__(self, connection, deadline):
+		self.connection = connection
+		self.deadline = deadline
+		self.buffer = b''
+
+	def fill(self):
+		remaining = self.deadline - time.monotonic()
+		if remaining <= 0:
+			raise TimeoutError('échéance de la sonde SSH')
+		self.connection.settimeout(remaining)
+		chunk = self.connection.recv(4096)
+		if not chunk:
+			raise ConnectionError('connexion SSH fermée')
+		self.buffer += chunk
+
+	def readLine(self):
+		while b'\n' not in self.buffer:
+			if len(self.buffer) > SSH_MAX_LINE:
+				raise ValueError('ligne SSH trop longue')
+			self.fill()
+		line, _, self.buffer = self.buffer.partition(b'\n')
+		return(line.rstrip(b'\r'))
+
+	def read(self, size):
+		while len(self.buffer) < size:
+			self.fill()
+		data, self.buffer = self.buffer[:size], self.buffer[size:]
+		return(data)
+
+
+def parseSshKexinit(payload):
+	"""Listes d’algorithmes d’un message SSH_MSG_KEXINIT : octet de type,
+	16 octets d’aléa, puis dix name-lists (RFC 4253 § 7.1)."""
+	if not payload or payload[0] != SSH_MSG_KEXINIT:
+		raise ValueError('message KEXINIT attendu')
+	offset = 17
+	lists = []
+	for _ in range(10):
+		if offset + 4 > len(payload):
+			raise ValueError('KEXINIT tronqué')
+		length = int.from_bytes(payload[offset:offset + 4], 'big')
+		offset += 4
+		if offset + length > len(payload):
+			raise ValueError('KEXINIT tronqué')
+		names = payload[offset:offset + length].decode('ascii')
+		offset += length
+		lists.append([name for name in names.split(',') if name])
+	return({
+		'kex_algorithms': [name for name in lists[0] if not SSH_KEX_MARKERS.match(name)],
+		'host_key_algorithms': lists[1],
+		'ciphers': list(dict.fromkeys(lists[2] + lists[3])),
+		'macs': list(dict.fromkeys(lists[4] + lists[5])),
+	})
+
+
+def probeSsh(hostip, port=22, timeout=None):
+	"""Bannière et algorithmes annoncés par un serveur SSH, sans authentification ;
+	None sans bannière SSH (port de CDN qui accepte la connexion sans rien servir)."""
+	timeout = PORT_PROBE_TIMEOUT if timeout is None else timeout
+	deadline = time.monotonic() + timeout
+	try:
+		with socket.create_connection((hostip, port), timeout=timeout) as connection:
+			reader = SshReader(connection, deadline)
+			for _ in range(SSH_MAX_BANNER_LINES):
+				line = reader.readLine()
+				if line.startswith(b'SSH-'):
+					break
+			else:
+				return(None)
+			banner = line.decode('ascii', errors='replace')
+			if not re.match(r'^SSH-(2\.0|1\.99)-', banner):
+				return({'banner': banner})
+			connection.sendall(SSH_CLIENT_BANNER)
+			packetLength = int.from_bytes(reader.read(4), 'big')
+			if not 5 <= packetLength <= SSH_MAX_PACKET:
+				raise ValueError('longueur de paquet SSH invalide')
+			packet = reader.read(packetLength)
+			payload = packet[1:packetLength - packet[0]]
+			return({'banner': banner, **parseSshKexinit(payload)})
+	except (OSError, ValueError, UnicodeDecodeError):
+		return(None)
+
+
+def classifySsh(probe):
+	"""Champs ssh_* d’une sonde : statut post-quantique de l’échange de clés et
+	de la clé d’hôte, chiffrement de 256 bits, algorithmes obsolètes."""
+	banner = probe['banner']
+	result = {
+		'ssh_banner': banner,
+		'ssh_software': banner.split('-', 2)[-1].split(' ')[0],
+	}
+	if 'kex_algorithms' not in probe:
+		return(result)
+	kex = probe['kex_algorithms']
+	hostKeys = probe['host_key_algorithms']
+	if any(name in SSH_HYBRID_MLKEM_KEX for name in kex):
+		kexStatus = 'hybrid'
+	elif any(name in SSH_HYBRID_SNTRUP_KEX for name in kex):
+		kexStatus = 'hybrid_sntrup'
+	elif any('mlkem' in name for name in kex):
+		kexStatus = 'pure'
+	else:
+		kexStatus = 'classical'
+	hostKeyStatuses = {classifyHandshakeSignature(name) for name in hostKeys}
+	algorithms = kex + hostKeys + probe['ciphers'] + probe['macs']
+	result.update({
+		'ssh_kex_algorithms': kex,
+		'ssh_host_key_algorithms': hostKeys,
+		'ssh_ciphers': probe['ciphers'],
+		'ssh_macs': probe['macs'],
+		'ssh_pqc_kex_status': kexStatus,
+		'ssh_pqc_kex_algorithms': [name for name in kex if 'mlkem' in name or 'sntrup' in name],
+		'ssh_host_key_pqc_status': (
+			'hybrid' if 'hybrid' in hostKeyStatuses
+			else 'pqc' if 'pqc' in hostKeyStatuses
+			else 'classical'
+		),
+		'ssh_cipher_256': any('aes256' in name or 'chacha20' in name for name in probe['ciphers']),
+		'ssh_weak_algorithms': sorted({name for name in algorithms if SSH_WEAK_ALGORITHMS.match(name)}),
+	})
+	return(result)
+
+
+def resetSshCache():
+	with sshLocksGuard:
+		sshResults.clear()
+		sshLocks.clear()
+
+
+def sshObservation(hostip, commandSemaphore=None):
+	"""Une seule sonde SSH par adresse et par run, partagée par tous les FQDN de
+	l’adresse : la clé d’hôte appartient à la machine, et un fail2ban ne doit pas
+	compter une connexion par nom."""
+	with sshLocksGuard:
+		lock = sshLocks.setdefault(hostip, threading.Lock())
+	with lock:
+		if hostip not in sshResults:
+			with commandSlot(commandSemaphore):
+				probe = probeSsh(hostip)
+			sshResults[hostip] = classifySsh(probe) if probe else {}
+		return(dict(sshResults[hostip]))
+
+
 def testPortEncryption(hostip, host, port, commandSemaphore=None):
 	"""Indique si le service d’un port ouvert est chiffré : tls (TLS direct),
 	starttls, ssh, redirect (HTTP en clair qui redirige vers HTTPS, ports de
@@ -1722,6 +1893,12 @@ def analysePortEncryption(item, ip, host, commandSemaphore=None):
 			continue
 		if port == 443 and item.get('certificate_sha256'):
 			result['tls_port443'] = 'tls'
+			continue
+		if port == 22:
+			# Sans bannière SSH, le port n’est pas un service SSH prouvé.
+			ssh = sshObservation(ip, commandSemaphore=commandSemaphore)
+			result['tls_port22'] = 'ssh' if ssh else None
+			result.update(ssh)
 			continue
 		state, certificate = probePort(ip, host, port, commandSemaphore=commandSemaphore)
 		result[f'tls_port{port}'] = state
@@ -2181,6 +2358,7 @@ def tlsCartography(
 	excelFile = dataDir / f'{filePrefix}_hosts_analyse.xlsx'
 	checkpointFile = dataDir / f'{filePrefix}_hosts_analyse.checkpoint.json'
 	commandSemaphore = threading.BoundedSemaphore(subprocessBudget)
+	resetSshCache()
 	if cipherList is None:
 		cipherList = getAllCipherSuites(commandSemaphore=commandSemaphore)
 	hostList = extractListHosts(inputFile)

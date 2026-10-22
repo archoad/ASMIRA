@@ -2,6 +2,7 @@
 
 import argparse
 import json
+import shutil
 import socket
 import sys
 import time
@@ -14,6 +15,7 @@ import fqdnCollect
 import webTLS
 from asmiraCommon import (
 	DEFAULT_CONFIG_PATH,
+	RUN_ID_PATTERN,
 	atomicWriteNdjson,
 	atomicWriteText,
 	createRunId,
@@ -752,6 +754,28 @@ def buildFqdnObservation(items, runId):
 		for state, code in PORT_CERTIFICATE_FINDINGS.items()
 		if state in portCertificates
 	)
+	# SSH (fiche ANSSI) : NTRU Prime, hybride mais non normalisé, ne déclenche
+	# pas l’absence d’échange de clés post-quantique.
+	sshItems = [item for item in items if item.get('ssh_banner')]
+	if sshItems:
+		exposure['ssh'] = {
+			'ip': itemValues(sshItems, 'ip'),
+			'banner': itemValues(sshItems, 'ssh_banner'),
+			'software': itemValues(sshItems, 'ssh_software'),
+			'kex_algorithms': itemListValues(sshItems, 'ssh_kex_algorithms'),
+			'host_key_algorithms': itemListValues(sshItems, 'ssh_host_key_algorithms'),
+			'ciphers': itemListValues(sshItems, 'ssh_ciphers'),
+			'macs': itemListValues(sshItems, 'ssh_macs'),
+			'pqc_kex_status': itemValues(sshItems, 'ssh_pqc_kex_status'),
+			'pqc_kex_algorithms': itemListValues(sshItems, 'ssh_pqc_kex_algorithms'),
+			'host_key_pqc_status': itemValues(sshItems, 'ssh_host_key_pqc_status'),
+			'cipher_256': itemValues(sshItems, 'ssh_cipher_256'),
+			'weak_algorithms': itemListValues(sshItems, 'ssh_weak_algorithms'),
+		}
+		if {'classical', 'pure'} & set(exposure['ssh']['pqc_kex_status']):
+			exposureFindings.add('SSH_NO_PQC_KEX')
+		if exposure['ssh']['weak_algorithms']:
+			exposureFindings.add('SSH_WEAK_ALGORITHMS')
 	if exposureFindings:
 		addFindings(tls, exposureFindings)
 	return(event)
@@ -1041,6 +1065,24 @@ def writeRunReport(config, reportFile, runEvent, discoveryResult, exposureEvents
 	return(True)
 
 
+def cleanRuns(runsDir, currentRunId):
+	"""Ne garde que le répertoire du run courant, sans son checkpoint : aucun
+	run ne relit celui d’un run antérieur (l’état précédent vient des exports,
+	la mémoire des collecteurs de state_dir). Seuls les répertoires nommés
+	comme un run-id sont supprimés."""
+	runsDir = Path(runsDir)
+	removed = []
+	checkpoint = runsDir / currentRunId / f'{currentRunId}_hosts_analyse.checkpoint.json'
+	if checkpoint.is_file():
+		checkpoint.unlink()
+		removed.append(checkpoint)
+	for path in sorted(runsDir.iterdir()):
+		if path.name != currentRunId and path.is_dir() and RUN_ID_PATTERN.fullmatch(path.name):
+			shutil.rmtree(path)
+			removed.append(path)
+	return(removed)
+
+
 def run(config, runId=None, maxEndpoints=None, discoveryOnly=False):
 	validateConfigScope(config)
 	runId = createRunId() if runId is None else validateRunId(runId)
@@ -1055,6 +1097,7 @@ def run(config, runId=None, maxEndpoints=None, discoveryOnly=False):
 	exposureResult = None
 	exposureEvents = None
 	previousExposureEvents = None
+	effectiveMaxEndpoints = None
 	status = 'failed'
 	errorMessage = None
 	try:
@@ -1188,6 +1231,14 @@ def run(config, runId=None, maxEndpoints=None, discoveryOnly=False):
 			exposureEvents,
 			previousExposureEvents,
 		)
+		# Purge après un run réussi qui a analysé tous les endpoints : un run de
+		# découverte seule ou plafonné (--max-endpoints) garde l’analyse complète
+		# précédente ; un run en échec garde tout pour le diagnostic et la reprise.
+		if status == 'success' and exposureResult is not None and effectiveMaxEndpoints is None:
+			try:
+				cleanRuns(config.runsDir, runId)
+			except OSError as error:
+				print(f'[avertissement] Purge des runs incomplète : {error}', file=sys.stderr)
 	return({
 		'run_id': runId,
 		'run_dir': str(runDir),
