@@ -57,7 +57,7 @@
     {
       "type": "markdown",
       "config": {
-        "content": "### Synthèse\nChaque FQDN servant HTTPS reçoit une note de A+ à F, inspirée du guide SSL Labs sans le reproduire (modèle Asmira v2) : protocoles 30 %, échange de clés 30 % (+10 points avec un échange de clés hybride ML-KEM), chiffrement 40 %, puis plafonds (TLS 1.0/1.1 → B, 3DES ou RC4 → C, sans TLS 1.3 → A-). A+ exige HSTS et l’échange de clés hybride. **T** signale un certificat non fiable (expiré, auto-signé, chaîne invalide), **M** un nom non couvert, **NA** un port 443 ouvert sans session TLS. Un FQDN à plusieurs IP prend la note de la plus faible.",
+        "content": "### Synthèse\nChaque FQDN servant HTTPS reçoit une note de **A+** à **F** (inspirée du guide SSL Labs) : protocoles 30 %, échange de clés 30 % (+10 points avec un échange de clés hybride ML-KEM), chiffrement 40 %, puis plafonds (TLS 1.0/1.1 → B, 3DES ou RC4 → C, sans TLS 1.3 → A-). **A+** exige HSTS et l’échange de clés hybride. **T** signale un certificat non fiable (expiré, auto-signé, chaîne invalide), **M** un nom non couvert, **NA** un port 443 ouvert sans session TLS. Un FQDN à plusieurs IP prend la note de la plus faible.",
         "hide_border": true,
         "settings": {
           "open_links_in_new_tab": true
@@ -67,13 +67,13 @@
         "x": 0,
         "y": 0,
         "w": 48,
-        "h": 4
+        "h": 6
       }
     },
     {
       "grid": {
         "x": 0,
-        "y": 4,
+        "y": 6,
         "w": 16,
         "h": 5
       },
@@ -97,7 +97,7 @@
     {
       "grid": {
         "x": 16,
-        "y": 4,
+        "y": 6,
         "w": 16,
         "h": 5
       },
@@ -122,7 +122,7 @@
     {
       "grid": {
         "x": 32,
-        "y": 4,
+        "y": 6,
         "w": 16,
         "h": 5
       },
@@ -172,7 +172,7 @@
       },
       "grid": {
         "x": 0,
-        "y": 9,
+        "y": 11,
         "w": 16,
         "h": 11
       }
@@ -222,11 +222,14 @@
               "limit": 12
             }
           }
-        ]
+        ],
+        "legend": {
+          "visibility": "visible"
+        }
       },
       "grid": {
         "x": 16,
-        "y": 9,
+        "y": 11,
         "w": 32,
         "h": 11
       }
@@ -267,11 +270,14 @@
               "column": "Note"
             }
           }
-        ]
+        ],
+        "legend": {
+          "visibility": "visible"
+        }
       },
       "grid": {
         "x": 0,
-        "y": 20,
+        "y": 22,
         "w": 48,
         "h": 10
       }
@@ -279,7 +285,7 @@
     {
       "type": "markdown",
       "config": {
-        "content": "### Conformité TLS et corrections\nLa table classe les FQDN du plus urgent au moins urgent. « Note hors confiance » indique la note cryptographique si le problème de certificat était corrigé. Chaque constat est daté de sa première observation : un constat corrigé disparaît au run suivant et apparaît dans « Corrections récentes ». L’absence de HSTS, constat très fréquent et sans effet sur la note hors A+, est exclue de la liste des constats les plus anciens.",
+        "content": "### Conformité TLS et corrections\nLa table classe les FQDN du plus urgent au moins urgent. **Note hors confiance** indique la note cryptographique si le problème de certificat était corrigé. Chaque constat est daté de sa première observation. Un constat corrigé disparaît au run suivant et apparaît dans **Corrections récentes**. L’absence de HSTS, constat très fréquent et sans effet sur la note hors A+, est exclue de la liste des constats les plus anciens.",
         "hide_border": true,
         "settings": {
           "open_links_in_new_tab": true
@@ -287,9 +293,9 @@
       },
       "grid": {
         "x": 0,
-        "y": 30,
+        "y": 32,
         "w": 48,
-        "h": 4
+        "h": 5
       }
     },
     {
@@ -329,7 +335,7 @@
       },
       "grid": {
         "x": 0,
-        "y": 34,
+        "y": 37,
         "w": 48,
         "h": 16
       }
@@ -370,11 +376,14 @@
               }
             ]
           }
-        ]
+        ],
+        "legend": {
+          "visibility": "visible"
+        }
       },
       "grid": {
         "x": 0,
-        "y": 50,
+        "y": 53,
         "w": 48,
         "h": 10
       }
@@ -410,7 +419,7 @@
       },
       "grid": {
         "x": 0,
-        "y": 60,
+        "y": 63,
         "w": 24,
         "h": 14
       }
@@ -446,7 +455,7 @@
       },
       "grid": {
         "x": 24,
-        "y": 60,
+        "y": 63,
         "w": 24,
         "h": 14
       }
@@ -493,7 +502,7 @@
       },
       "grid": {
         "x": 0,
-        "y": 74,
+        "y": 77,
         "w": 24,
         "h": 12
       }
@@ -529,7 +538,7 @@
       },
       "grid": {
         "x": 24,
-        "y": 74,
+        "y": 77,
         "w": 24,
         "h": 12
       }
@@ -537,7 +546,7 @@
     {
       "grid": {
         "x": 0,
-        "y": 86,
+        "y": 89,
         "w": 16,
         "h": 10
       },
@@ -569,7 +578,7 @@
     {
       "grid": {
         "x": 16,
-        "y": 86,
+        "y": 89,
         "w": 16,
         "h": 10
       },
@@ -578,22 +587,41 @@
         "type": "pie",
         "title": "Certificats auto-signés",
         "data_source": {
-          "type": "data_view_spec",
-          "index_pattern": "asmira-exposure-current",
-          "time_field": "@timestamp"
+          "type": "esql",
+          "query": "FROM asmira-exposure-current | WHERE asmira.exposure.tls.self_signed IS NOT NULL | EVAL Certificat = CASE(MV_MAX(asmira.exposure.tls.self_signed) == true, \"Auto-signé\", \"Émis par une autorité\") | STATS FQDN = COUNT(*) BY Certificat"
         },
         "metrics": [
           {
-            "operation": "count"
+            "column": "FQDN"
           }
         ],
         "group_by": [
           {
-            "operation": "terms",
-            "fields": [
-              "asmira.exposure.tls.self_signed"
-            ],
-            "limit": 3
+            "column": "Certificat",
+            "color": {
+              "mode": "categorical",
+              "palette": "default",
+              "mapping": [
+                {
+                  "values": [
+                    "Émis par une autorité"
+                  ],
+                  "color": {
+                    "type": "color_code",
+                    "value": "#2E8B57"
+                  }
+                },
+                {
+                  "values": [
+                    "Auto-signé"
+                  ],
+                  "color": {
+                    "type": "color_code",
+                    "value": "#BD271E"
+                  }
+                }
+              ]
+            }
           }
         ]
       }
@@ -601,7 +629,7 @@
     {
       "grid": {
         "x": 32,
-        "y": 86,
+        "y": 89,
         "w": 16,
         "h": 10
       },
@@ -610,22 +638,41 @@
         "type": "pie",
         "title": "Validation des chaînes TLS",
         "data_source": {
-          "type": "data_view_spec",
-          "index_pattern": "asmira-exposure-current",
-          "time_field": "@timestamp"
+          "type": "esql",
+          "query": "FROM asmira-exposure-current | WHERE asmira.exposure.tls.chain_valid IS NOT NULL | EVAL `Chaîne` = CASE(MV_MIN(asmira.exposure.tls.chain_valid) == true, \"Chaîne valide\", \"Chaîne invalide\") | STATS FQDN = COUNT(*) BY `Chaîne`"
         },
         "metrics": [
           {
-            "operation": "count"
+            "column": "FQDN"
           }
         ],
         "group_by": [
           {
-            "operation": "terms",
-            "fields": [
-              "asmira.exposure.tls.chain_valid"
-            ],
-            "limit": 3
+            "column": "Chaîne",
+            "color": {
+              "mode": "categorical",
+              "palette": "default",
+              "mapping": [
+                {
+                  "values": [
+                    "Chaîne valide"
+                  ],
+                  "color": {
+                    "type": "color_code",
+                    "value": "#2E8B57"
+                  }
+                },
+                {
+                  "values": [
+                    "Chaîne invalide"
+                  ],
+                  "color": {
+                    "type": "color_code",
+                    "value": "#BD271E"
+                  }
+                }
+              ]
+            }
           }
         ]
       }
@@ -633,7 +680,7 @@
     {
       "type": "markdown",
       "config": {
-        "content": "### Certificats et ACME\nÉchéances, durées de vie et autorités. Les durées de vie se lisent au regard du calendrier CA/B Forum : 200 jours maximum depuis mars 2026, 100 jours en mars 2027, 47 jours en mars 2029. Le CAA est celui qu’une autorité appliquerait (RFC 8659 : premier enregistrement trouvé en remontant du FQDN vers son domaine). Sans CAA, toute autorité peut émettre ; avec un CAA, l’autorité ACME choisie doit y figurer. « Émetteur autorisé : NON » signale un certificat dont le renouvellement auprès de la même autorité échouera.",
+        "content": "### Certificats et ACME\nÉchéances, durées de vie et autorités. Les durées de vie se lisent au regard du calendrier CA/B Forum : 200 jours maximum depuis mars 2026, 100 jours en mars 2027, 47 jours en mars 2029. Le **CAA** est celui qu’une autorité appliquerait (RFC 8659 : premier enregistrement trouvé en remontant du FQDN vers son domaine). Sans CAA, toute autorité peut émettre. Avec un CAA, l’autorité ACME choisie doit y figurer. **Émetteur autorisé : NON** signale un certificat dont le renouvellement auprès de la même autorité échouera.",
         "hide_border": true,
         "settings": {
           "open_links_in_new_tab": true
@@ -641,15 +688,15 @@
       },
       "grid": {
         "x": 0,
-        "y": 96,
+        "y": 99,
         "w": 48,
-        "h": 4
+        "h": 5
       }
     },
     {
       "grid": {
         "x": 0,
-        "y": 100,
+        "y": 104,
         "w": 48,
         "h": 15
       },
@@ -710,7 +757,7 @@
       },
       "grid": {
         "x": 0,
-        "y": 115,
+        "y": 119,
         "w": 16,
         "h": 10
       }
@@ -743,7 +790,7 @@
       },
       "grid": {
         "x": 16,
-        "y": 115,
+        "y": 119,
         "w": 16,
         "h": 10
       }
@@ -751,7 +798,7 @@
     {
       "grid": {
         "x": 32,
-        "y": 115,
+        "y": 119,
         "w": 16,
         "h": 10
       },
@@ -802,7 +849,7 @@
       },
       "grid": {
         "x": 0,
-        "y": 125,
+        "y": 129,
         "w": 16,
         "h": 11
       }
@@ -843,11 +890,14 @@
               "column": "CAA"
             }
           }
-        ]
+        ],
+        "legend": {
+          "visibility": "visible"
+        }
       },
       "grid": {
         "x": 16,
-        "y": 125,
+        "y": 129,
         "w": 32,
         "h": 11
       }
@@ -886,7 +936,7 @@
       },
       "grid": {
         "x": 0,
-        "y": 136,
+        "y": 140,
         "w": 48,
         "h": 14
       }
@@ -894,7 +944,7 @@
     {
       "grid": {
         "x": 0,
-        "y": 150,
+        "y": 154,
         "w": 48,
         "h": 12
       },
@@ -939,7 +989,7 @@
     {
       "type": "markdown",
       "config": {
-        "content": "### Cryptographie et PQC\nL’ANSSI impose d’**associer** un algorithme post-quantique normalisé (ML-KEM, ML-DSA) à un algorithme classique. Pour l’échange de clés TLS 1.3, les groupes hybrides sont X25519MLKEM768, SecP256r1MLKEM768 et SecP384r1MLKEM1024 ; ML-KEM proposé seul n’est pas conforme. Chaque groupe est testé par une négociation réelle. Un FQDN dont toutes les adresses proposent un groupe hybride a adopté l’approche hybride ; il gagne 10 points sur l’échange de clés et peut seul atteindre A+. Le statut PQC du **certificat** (signature ML-DSA…) reste suivi pour la veille : aucune autorité publique n’émet encore de tels certificats.",
+        "content": "### Cryptographie et PQC\nL’ANSSI impose d’**associer** un algorithme post-quantique normalisé (ML-KEM, ML-DSA) à un algorithme classique. Pour l’échange de clés TLS 1.3, les groupes hybrides sont X25519MLKEM768, SecP256r1MLKEM768 et SecP384r1MLKEM1024 ; ML-KEM proposé seul n’est pas conforme. Chaque groupe est testé par une négociation réelle. Un FQDN dont toutes les adresses proposent un groupe hybride a adopté l’approche hybride, il gagne 10 points sur l’échange de clés et peut seul atteindre A+. Le statut PQC du **certificat** (signature ML-DSA…) reste suivi pour la veille : aucune autorité publique n’émet encore de tels certificats.",
         "hide_border": true,
         "settings": {
           "open_links_in_new_tab": true
@@ -947,9 +997,9 @@
       },
       "grid": {
         "x": 0,
-        "y": 162,
+        "y": 166,
         "w": 48,
-        "h": 4
+        "h": 6
       }
     },
     {
@@ -974,7 +1024,7 @@
       },
       "grid": {
         "x": 0,
-        "y": 166,
+        "y": 172,
         "w": 16,
         "h": 11
       }
@@ -1015,11 +1065,14 @@
               "column": "Échange de clés"
             }
           }
-        ]
+        ],
+        "legend": {
+          "visibility": "visible"
+        }
       },
       "grid": {
         "x": 16,
-        "y": 166,
+        "y": 172,
         "w": 32,
         "h": 11
       }
@@ -1046,7 +1099,7 @@
       },
       "grid": {
         "x": 0,
-        "y": 177,
+        "y": 183,
         "w": 16,
         "h": 10
       }
@@ -1093,7 +1146,7 @@
       },
       "grid": {
         "x": 16,
-        "y": 177,
+        "y": 183,
         "w": 16,
         "h": 10
       }
@@ -1126,7 +1179,7 @@
       },
       "grid": {
         "x": 32,
-        "y": 177,
+        "y": 183,
         "w": 16,
         "h": 10
       }
@@ -1134,172 +1187,103 @@
     {
       "grid": {
         "x": 0,
-        "y": 187,
+        "y": 193,
         "w": 24,
         "h": 10
       },
       "type": "vis",
       "config": {
-        "type": "pie",
+        "type": "xy",
         "title": "Suites cryptographiques TLS négociées",
-        "legend": {
-          "visibility": "visible",
-          "nested": false
-        },
-        "data_source": {
-          "type": "data_view_spec",
-          "index_pattern": "asmira-exposure-current",
-          "time_field": "@timestamp"
-        },
-        "metrics": [
-          {
-            "operation": "count",
-            "empty_as_null": true,
-            "label": "FQDN avec négociation TLS"
+        "axis": {
+          "x": {
+            "title": {
+              "visible": false
+            }
+          },
+          "y": {
+            "title": {
+              "visible": false
+            }
           }
-        ],
-        "group_by": [
+        },
+        "layers": [
           {
-            "operation": "terms",
-            "fields": [
-              "asmira.exposure.tls.negotiated_cipher"
+            "type": "bar_horizontal",
+            "data_source": {
+              "type": "esql",
+              "query": "FROM asmira-exposure-current | WHERE asmira.exposure.tls.negotiated_cipher IS NOT NULL | MV_EXPAND asmira.exposure.tls.negotiated_cipher | EVAL Suite = asmira.exposure.tls.negotiated_cipher | EVAL `Évaluation` = CASE(Suite RLIKE \".*(NULL|EXP|anon|ADH|AECDH|RC4|DES|IDEA|MD5).*\", \"Faible (RC4, 3DES, NULL…) : à désactiver\", Suite RLIKE \"TLS_(AES|CHACHA20|AKE)_.*\", \"TLS 1.3 : recommandée\", Suite RLIKE \"(ECDHE|DHE)-.*(GCM|CHACHA20|CCM).*\", \"TLS 1.2 ECDHE + AEAD (GCM, ChaCha20) : recommandée\", Suite RLIKE \"(ECDHE|DHE)-.*\", \"TLS 1.2 ECDHE sans AEAD (CBC) : à éviter\", \"Échange RSA statique, sans confidentialité persistante : à éviter\") | STATS FQDN = COUNT(*) BY Suite, `Évaluation` | SORT FQDN DESC"
+            },
+            "x": {
+              "column": "Suite"
+            },
+            "y": [
+              {
+                "column": "FQDN"
+              }
             ],
-            "limit": 15,
-            "other_bucket": {
-              "include_documents_without_field": false
+            "breakdown_by": {
+              "column": "Évaluation"
             }
           }
         ],
-        "styling": {
-          "donut_hole": "m",
-          "labels": {
-            "visible": true,
-            "position": "inside"
-          },
-          "values": {
-            "visible": true,
-            "mode": "percentage"
-          }
+        "legend": {
+          "visibility": "visible"
         }
       }
     },
     {
       "grid": {
         "x": 24,
-        "y": 187,
+        "y": 193,
         "w": 24,
         "h": 10
       },
       "type": "vis",
       "config": {
-        "type": "pie",
+        "type": "xy",
         "title": "Statut PQC des certificats TLS par FQDN",
-        "legend": {
-          "visibility": "visible",
-          "nested": false
-        },
-        "data_source": {
-          "type": "data_view_spec",
-          "index_pattern": "asmira-exposure-certificates-current",
-          "time_field": "@timestamp"
-        },
-        "metrics": [
-          {
-            "operation": "count",
-            "empty_as_null": true,
-            "label": "FQDN avec certificat"
+        "axis": {
+          "x": {
+            "title": {
+              "visible": false
+            }
+          },
+          "y": {
+            "title": {
+              "visible": false
+            }
           }
-        ],
-        "group_by": [
+        },
+        "layers": [
           {
-            "operation": "terms",
-            "fields": [
-              "asmira.exposure.tls.certificate_pqc_status"
+            "type": "bar_horizontal",
+            "data_source": {
+              "type": "esql",
+              "query": "FROM asmira-exposure-certificates-current | EVAL statut = MV_MIN(asmira.exposure.tls.certificate_pqc_status), typeCle = MV_MIN(asmira.exposure.tls.certificate_key_type), taille = COALESCE(TO_STRING(MV_MAX(asmira.exposure.tls.certificate_key_size)), \"?\") | EVAL `Clé du certificat` = CASE(asmira.exposure.tls.certificate_pqc_algorithms IS NOT NULL, MV_CONCAT(asmira.exposure.tls.certificate_pqc_algorithms, \" + \"), typeCle == \"RSAPublicKey\", CONCAT(\"RSA \", taille), typeCle == \"EllipticCurvePublicKey\", CONCAT(\"ECDSA P-\", taille), typeCle == \"DSAPublicKey\", CONCAT(\"DSA \", taille), typeCle == \"Ed25519PublicKey\", \"Ed25519\", typeCle == \"Ed448PublicKey\", \"Ed448\", typeCle IS NULL, \"Clé non lue\", typeCle) | EVAL `Statut post-quantique` = CASE(statut == \"classical\", \"Classique : RSA/ECDSA, cassable par un ordinateur quantique\", statut == \"hybrid\", \"Hybride : ML-DSA composite + classique (cible ANSSI)\", statut == \"pqc\", \"Post-quantique seul : ML-DSA ou SLH-DSA\", statut == \"partial\", \"Partiel : clé et signature de natures différentes\", \"Indéterminé : algorithme non reconnu\") | STATS FQDN = COUNT(*) BY `Clé du certificat`, `Statut post-quantique` | SORT FQDN DESC"
+            },
+            "x": {
+              "column": "Clé du certificat"
+            },
+            "y": [
+              {
+                "column": "FQDN"
+              }
             ],
-            "limit": 5,
-            "other_bucket": {
-              "include_documents_without_field": true
-            },
-            "rank_by": {
-              "type": "metric",
-              "metric_index": 0,
-              "direction": "desc"
-            },
-            "color": {
-              "mode": "categorical",
-              "palette": "default",
-              "mapping": [
-                {
-                  "values": [
-                    "pqc"
-                  ],
-                  "color": {
-                    "type": "from_palette",
-                    "palette": "default",
-                    "index": 4
-                  }
-                },
-                {
-                  "values": [
-                    "hybrid"
-                  ],
-                  "color": {
-                    "type": "from_palette",
-                    "palette": "default",
-                    "index": 0
-                  }
-                },
-                {
-                  "values": [
-                    "partial"
-                  ],
-                  "color": {
-                    "type": "from_palette",
-                    "palette": "default",
-                    "index": 3
-                  }
-                },
-                {
-                  "values": [
-                    "classical"
-                  ],
-                  "color": {
-                    "type": "from_palette",
-                    "palette": "default",
-                    "index": 6
-                  }
-                },
-                {
-                  "values": [
-                    "unknown"
-                  ],
-                  "color": {
-                    "type": "from_palette",
-                    "palette": "default",
-                    "index": 5
-                  }
-                }
-              ]
+            "breakdown_by": {
+              "column": "Statut post-quantique"
             }
           }
         ],
-        "styling": {
-          "donut_hole": "m",
-          "labels": {
-            "visible": true,
-            "position": "inside"
-          },
-          "values": {
-            "visible": true,
-            "mode": "percentage"
-          }
+        "legend": {
+          "visibility": "visible"
         }
       }
     },
     {
       "type": "markdown",
       "config": {
-        "content": "### Surface d’exposition\nPorts sondés : 22, 25, 80, 443, 465, 587, 993, 995, 3389, 8080 et 8443. Pour chaque port ouvert, Asmira vérifie le chiffrement : TLS direct (443, 465, 993, 995, 8080, 8443), STARTTLS (25, 587), CredSSP/TLS ou chiffrement RDP natif (3389) ; 22 est classé SSH. Un port n’est classé en clair que si le service a répondu sans chiffrement ; un port de CDN muet reste indéterminé. Seul le port 80 est du HTTP en clair par nature et ne compte pas comme service non chiffré ; un 8080 en clair n’est compté que s’il ne redirige pas vers HTTPS (« Redirection HTTPS »), car HSTS conserve le port.",
+        "content": "### Surface d’exposition\nPorts sondés : 22, 25, 80, 443, 465, 587, 993, 995, 3389, 8080 et 8443. Pour chaque port ouvert, Asmira vérifie le chiffrement : TLS direct (443, 465, 993, 995, 8080, 8443), STARTTLS (25, 587), CredSSP/TLS ou chiffrement RDP natif (3389). Le port 22 est classé SSH. Un port n’est classé en clair que si le service a répondu sans chiffrement. Un port de CDN muet reste indéterminé. Seul le port 80 est du HTTP en clair par nature et ne compte pas comme service non chiffré. Un 8080 en clair n’est compté que s’il ne redirige pas vers HTTPS (**Redirection HTTPS**), car HSTS conserve le port.",
         "hide_border": true,
         "settings": {
           "open_links_in_new_tab": true
@@ -1307,9 +1291,9 @@
       },
       "grid": {
         "x": 0,
-        "y": 197,
+        "y": 203,
         "w": 48,
-        "h": 3
+        "h": 6
       }
     },
     {
@@ -1349,7 +1333,7 @@
       },
       "grid": {
         "x": 0,
-        "y": 200,
+        "y": 209,
         "w": 24,
         "h": 11
       }
@@ -1390,11 +1374,14 @@
               "column": "Chiffrement"
             }
           }
-        ]
+        ],
+        "legend": {
+          "visibility": "visible"
+        }
       },
       "grid": {
         "x": 24,
-        "y": 200,
+        "y": 209,
         "w": 24,
         "h": 11
       }
@@ -1430,7 +1417,7 @@
       },
       "grid": {
         "x": 0,
-        "y": 211,
+        "y": 220,
         "w": 48,
         "h": 12
       }
@@ -1438,71 +1425,7 @@
     {
       "grid": {
         "x": 0,
-        "y": 223,
-        "w": 24,
-        "h": 10
-      },
-      "type": "vis",
-      "config": {
-        "type": "pie",
-        "title": "État du port HTTPS",
-        "data_source": {
-          "type": "data_view_spec",
-          "index_pattern": "asmira-exposure-current",
-          "time_field": "@timestamp"
-        },
-        "metrics": [
-          {
-            "operation": "count"
-          }
-        ],
-        "group_by": [
-          {
-            "operation": "terms",
-            "fields": [
-              "asmira.exposure.port.443.state"
-            ],
-            "limit": 9
-          }
-        ]
-      }
-    },
-    {
-      "grid": {
-        "x": 24,
-        "y": 223,
-        "w": 24,
-        "h": 10
-      },
-      "type": "vis",
-      "config": {
-        "type": "pie",
-        "title": "État des scans d’endpoints",
-        "data_source": {
-          "type": "data_view_spec",
-          "index_pattern": "asmira-exposure-current",
-          "time_field": "@timestamp"
-        },
-        "metrics": [
-          {
-            "operation": "count"
-          }
-        ],
-        "group_by": [
-          {
-            "operation": "terms",
-            "fields": [
-              "asmira.exposure.scan.status"
-            ],
-            "limit": 9
-          }
-        ]
-      }
-    },
-    {
-      "grid": {
-        "x": 0,
-        "y": 233,
+        "y": 232,
         "w": 24,
         "h": 10
       },
@@ -1549,7 +1472,7 @@
     {
       "grid": {
         "x": 24,
-        "y": 233,
+        "y": 232,
         "w": 24,
         "h": 10
       },
@@ -1596,7 +1519,7 @@
     {
       "grid": {
         "x": 0,
-        "y": 243,
+        "y": 242,
         "w": 48,
         "h": 10
       },
@@ -1644,15 +1567,18 @@
               "limit": 3
             }
           }
-        ]
+        ],
+        "legend": {
+          "visibility": "visible"
+        }
       }
     },
     {
       "grid": {
         "x": 0,
-        "y": 253,
+        "y": 252,
         "w": 48,
-        "h": 3
+        "h": 4
       },
       "type": "markdown",
       "config": {
@@ -1735,22 +1661,41 @@
         "title": "Résolution DNS des candidats",
         "ignore_global_filters": true,
         "data_source": {
-          "type": "data_view_spec",
-          "index_pattern": "asmira-discovery-latest",
-          "time_field": "@timestamp"
+          "type": "esql",
+          "query": "FROM asmira-discovery-latest | WHERE asmira.discovery.resolvable IS NOT NULL | EVAL `Résolution` = CASE(asmira.discovery.resolvable == true, \"Résout\", \"Ne résout pas\") | STATS Candidats = COUNT(*) BY `Résolution`"
         },
         "metrics": [
           {
-            "operation": "count"
+            "column": "Candidats"
           }
         ],
         "group_by": [
           {
-            "operation": "terms",
-            "fields": [
-              "asmira.discovery.resolvable"
-            ],
-            "limit": 3
+            "column": "Résolution",
+            "color": {
+              "mode": "categorical",
+              "palette": "default",
+              "mapping": [
+                {
+                  "values": [
+                    "Résout"
+                  ],
+                  "color": {
+                    "type": "color_code",
+                    "value": "#6092C0"
+                  }
+                },
+                {
+                  "values": [
+                    "Ne résout pas"
+                  ],
+                  "color": {
+                    "type": "color_code",
+                    "value": "#98A2B3"
+                  }
+                }
+              ]
+            }
           }
         ]
       }
@@ -1768,22 +1713,41 @@
         "title": "Motifs wildcard conservés",
         "ignore_global_filters": true,
         "data_source": {
-          "type": "data_view_spec",
-          "index_pattern": "asmira-discovery-latest",
-          "time_field": "@timestamp"
+          "type": "esql",
+          "query": "FROM asmira-discovery-latest | WHERE asmira.discovery.wildcard_pattern IS NOT NULL | EVAL Nom = CASE(asmira.discovery.wildcard_pattern == true, \"Motif wildcard (*.domaine)\", \"Nom explicite\") | STATS Candidats = COUNT(*) BY Nom"
         },
         "metrics": [
           {
-            "operation": "count"
+            "column": "Candidats"
           }
         ],
         "group_by": [
           {
-            "operation": "terms",
-            "fields": [
-              "asmira.discovery.wildcard_pattern"
-            ],
-            "limit": 3
+            "column": "Nom",
+            "color": {
+              "mode": "categorical",
+              "palette": "default",
+              "mapping": [
+                {
+                  "values": [
+                    "Nom explicite"
+                  ],
+                  "color": {
+                    "type": "color_code",
+                    "value": "#6092C0"
+                  }
+                },
+                {
+                  "values": [
+                    "Motif wildcard (*.domaine)"
+                  ],
+                  "color": {
+                    "type": "color_code",
+                    "value": "#98A2B3"
+                  }
+                }
+              ]
+            }
           }
         ]
       }
@@ -1841,7 +1805,7 @@
         "x": 0,
         "y": 276,
         "w": 48,
-        "h": 3
+        "h": 4
       },
       "type": "markdown",
       "config": {
@@ -1855,9 +1819,9 @@
     {
       "grid": {
         "x": 0,
-        "y": 279,
+        "y": 280,
         "w": 48,
-        "h": 10
+        "h": 5
       },
       "type": "vis",
       "config": {

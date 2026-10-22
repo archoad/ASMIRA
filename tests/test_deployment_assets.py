@@ -52,7 +52,7 @@ def testElasticJsonAssetsAreValidAndDashboardIsGlobal():
 	assert fqdnTransform['dest']['index'] == 'asmira-fqdn-latest'
 	assert 'retention_policy' not in fqdnTransform
 	assert dashboard['title'] == '[archoad] Asmira — Surface d’exposition globale'
-	assert len(dashboard['panels']) == 51
+	assert len(dashboard['panels']) == 49
 	controls = dashboard['pinned_panels']
 	assert [control['config']['title'] for control in controls] == ['Domaine', 'FQDN']
 	assert [control['config']['field_name'] for control in controls] == [
@@ -73,7 +73,6 @@ def testElasticJsonAssetsAreValidAndDashboardIsGlobal():
 		for panel in dashboard['panels']
 		if panel['config'].get('title')
 	} >= {
-		'État du port HTTPS',
 		'Versions TLS supportées',
 		'Certificats expirés ou proches de l’expiration',
 		'Changements observés sur la période',
@@ -108,7 +107,11 @@ def testElasticJsonAssetsAreValidAndDashboardIsGlobal():
 		'Approche hybride post-quantique (ANSSI)',
 		'Groupes ML-KEM acceptés',
 	}
-	assert 'Erreurs récentes de cartographie' not in {
+	assert not {
+		'Erreurs récentes de cartographie',
+		'État du port HTTPS',
+		'État des scans d’endpoints',
+	} & {
 		panel['config'].get('title')
 		for panel in dashboard['panels']
 	}
@@ -171,17 +174,14 @@ def testElasticJsonAssetsAreValidAndDashboardIsGlobal():
 		for panel in dashboard['panels']
 		if panel['config'].get('title') == 'Statut PQC des certificats TLS par FQDN'
 	)
-	assert pqcPanel['config']['group_by'][0]['fields'] == [
-		'asmira.exposure.tls.certificate_pqc_status',
-	]
-	assert pqcPanel['config']['data_source']['index_pattern'] == (
-		'asmira-exposure-certificates-current'
+	pqcLayer = pqcPanel['config']['layers'][0]
+	assert pqcLayer['type'] == 'bar_horizontal'
+	assert pqcLayer['data_source']['query'].startswith(
+		'FROM asmira-exposure-certificates-current '
 	)
-	assert pqcPanel['config']['group_by'][0]['other_bucket'] == {
-		'include_documents_without_field': True,
-	}
-	assert pqcPanel['config']['styling']['donut_hole'] == 'm'
-	assert pqcPanel['config']['styling']['values']['mode'] == 'percentage'
+	assert 'asmira.exposure.tls.certificate_pqc_status' in pqcLayer['data_source']['query']
+	assert '"classical", "Classique' in pqcLayer['data_source']['query']
+	assert pqcLayer['breakdown_by'] == {'column': 'Statut post-quantique'}
 	cryptoPanel = next(
 		panel
 		for panel in dashboard['panels']
@@ -189,12 +189,39 @@ def testElasticJsonAssetsAreValidAndDashboardIsGlobal():
 			'Suites cryptographiques TLS négociées'
 		)
 	)
-	assert cryptoPanel['config']['group_by'][0]['fields'] == [
-		'asmira.exposure.tls.negotiated_cipher',
-	]
-	assert cryptoPanel['config']['metrics'][0]['label'] == (
-		'FQDN avec négociation TLS'
+	cryptoLayer = cryptoPanel['config']['layers'][0]
+	assert cryptoLayer['type'] == 'bar_horizontal'
+	assert 'MV_EXPAND asmira.exposure.tls.negotiated_cipher' in (
+		cryptoLayer['data_source']['query']
 	)
+	assert cryptoLayer['x'] == {'column': 'Suite'}
+	assert cryptoLayer['breakdown_by'] == {'column': 'Évaluation'}
+	# Kibana masque la légende des XY par défaut : la forcer dès qu’il y a plusieurs séries.
+	for panel in xyPanels:
+		layer = panel['config']['layers'][0]
+		if 'breakdown_by' in layer or len(layer['y']) > 1:
+			assert panel['config']['legend'] == {'visibility': 'visible'}
+	for title, expected in (
+		('Certificats auto-signés', {
+			'Émis par une autorité': '#2E8B57',
+			'Auto-signé': '#BD271E',
+		}),
+		('Validation des chaînes TLS', {
+			'Chaîne valide': '#2E8B57',
+			'Chaîne invalide': '#BD271E',
+		}),
+	):
+		booleanPanel = next(
+			panel
+			for panel in dashboard['panels']
+			if panel['config'].get('title') == title
+		)
+		assert booleanPanel['config']['data_source']['type'] == 'esql'
+		assert {
+			value: rule['color']['value']
+			for rule in booleanPanel['config']['group_by'][0]['color']['mapping']
+			for value in rule['values']
+		} == expected
 	changePanel = next(
 		panel
 		for panel in dashboard['panels']

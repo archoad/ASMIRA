@@ -140,7 +140,11 @@ masquent leurs titres d’axes, et le panneau d’erreurs d’endpoints a été 
 au profit de la santé synthétique du run. À côté du statut PQC, le panneau
 **Suites cryptographiques TLS négociées** répartit
 `asmira.exposure.tls.negotiated_cipher`, c’est-à-dire la suite effectivement
-négociée lorsque la sonde a pu établir une session TLS.
+négociée lorsque la sonde a pu établir une session TLS, en barres horizontales
+colorées par évaluation (TLS 1.3, TLS 1.2 ECDHE + AEAD, CBC, RSA statique,
+suites faibles). Les donuts « État du port HTTPS » et « État des scans
+d’endpoints » ont été retirés le 21 octobre 2026 : ils ne servaient aucune
+décision.
 
 Les événements d’exposition indexent l’empreinte SHA-256 du certificat, les OID
 de sa clé publique et de sa signature, les algorithmes PQC reconnus et le statut
@@ -151,8 +155,10 @@ et classe le FQDN `updated` lorsque son état matériel change. Le dashboard
 affiche ces transitions dans un tableau dédié.
 
 Les statuts possibles sont `pqc`, `hybrid`, `partial`, `classical` et `unknown`.
-Le dashboard courant présente leur répartition dans le donut **Statut PQC des
-certificats TLS par FQDN**. ML-DSA et SLH-DSA sont
+Le dashboard courant présente leur répartition dans les barres **Statut PQC des
+certificats TLS par FQDN**, ventilées par clé du certificat (RSA 2048, ECDSA
+P-256…) avec une légende explicite ; au 21 octobre 2026, tous les certificats
+sont `classical`. ML-DSA et SLH-DSA sont
 reconnus depuis leurs OID standardisés ; les OID composites ML-DSA/classiques
 restent distingués comme hybrides. Ce statut décrit le certificat X.509 et ne
 doit pas être interprété comme une preuve d’échange de clés TLS post-quantique.
