@@ -1654,3 +1654,43 @@ def testAnalyseWebAuthenticationNeedsChromedriver(monkeypatch):
 
 	assert webTLS.analyseWebAuthentication(items) == 0
 	assert 'web_auth' not in items[0]
+
+
+@pytest.mark.parametrize('url', ['https://[::1/x', 'https://h.example.com:99999/', 'https://h.example.com:abc/', None])
+def testMalformedPageUrlsAreIgnored(url):
+	assert webTLS.splitUrl(url) is None or url is None
+	assert webTLS.cleanUrl(url) is None
+	assert webTLS.identifyIdp(url) == (None, None)
+	assert webTLS.idpIsCorporate(url, ('sts.example.com',)) is False
+	page = webPage(form_actions=[url] if url else [], login_links=[url] if url else [])
+	assert webTLS.classifyWebAuth(None, [page])['web_auth'] == 'none'
+	assert webTLS.chooseLoginLink(page, 'example.com') is None
+
+
+def testPublicWordPressHomeIsNotALoginPage():
+	home = webPage('https://blog.example.com/', generator='WordPress 6.5', login_links=['https://blog.example.com/wp-login.php'])
+
+	result = webTLS.classifyWebAuth(None, [home])
+
+	assert result['web_auth'] == 'none'
+	assert result['web_auth_product'] == 'WordPress'
+	assert webTLS.chooseLoginLink(home, 'example.com') == 'https://blog.example.com/wp-login.php'
+	assert webTLS.classifyWebAuth(None, [home, webPage('https://blog.example.com/wp-login.php', password_fields=1)])['web_auth'] == 'local_form'
+
+
+def testAnalyseWebAuthenticationSurvivesAnUnexpectedError(monkeypatch):
+	def failingObservation(host, hostip, registeredDomain=None, corporateIdp=()):
+		if host == 'bad.example.com':
+			raise ValueError('Port out of range 0-65535')
+		return({'web_auth': 'none'})
+
+	monkeypatch.setattr(webTLS, 'webAuthAvailability', lambda: None)
+	monkeypatch.setattr(webTLS, 'webAuthObservation', failingObservation)
+	items = [
+		{'host': 'bad.example.com', 'ip': '192.0.2.1', 'port443': 'open', 'certificate_sha256': 'a'},
+		{'host': 'good.example.com', 'ip': '192.0.2.2', 'port443': 'open', 'certificate_sha256': 'b'},
+	]
+
+	assert webTLS.analyseWebAuthentication(items) == 2
+	assert [item['web_auth'] for item in items] == ['unknown', 'none']
+	assert items[0]['web_auth_ip'] == '192.0.2.1'

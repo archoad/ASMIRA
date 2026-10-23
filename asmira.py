@@ -19,6 +19,7 @@ from asmiraCommon import (
 	atomicWriteNdjson,
 	atomicWriteText,
 	createRunId,
+	encodeSshServer,
 	loadConfig,
 	stableId,
 	utcNow,
@@ -473,6 +474,11 @@ def exposureState(event):
 		),
 		'scan_status': eventValues(event, 'asmira', 'exposure', 'scan', 'status'),
 		'tls_grade': eventValues(event, 'asmira', 'exposure', 'tls', 'grade'),
+		# Serveurs SSH (statut, logiciel, algorithmes) et authentification web :
+		# une dégradation marque l’entité « updated », pas seulement ses constats.
+		'ssh_servers': eventValues(event, 'asmira', 'exposure', 'ssh', 'servers'),
+		'web_auth_type': eventValues(event, 'asmira', 'exposure', 'web_auth', 'type'),
+		'web_auth_idp': eventValues(event, 'asmira', 'exposure', 'web_auth', 'idp'),
 	})
 
 
@@ -491,7 +497,9 @@ def previousItems(event):
 
 def rawEndpoint(item):
 	# Les PEM restent dans l’analyse du run : dans Elastic, ils alourdiraient
-	# chaque document sans être interrogeables.
+	# chaque document sans être interrogeables. Avec la purge des runs, seuls
+	# les certificats en service restent donc reclassables ; l’historique tient
+	# aux statuts PQC calculés à chaque run (choix assumé, voir administration.md).
 	return({
 		name: value for name, value in item.items()
 		if name not in RAW_EXCLUDED_FIELDS
@@ -772,6 +780,8 @@ def buildFqdnObservation(items, runId):
 			'cipher_256': itemValues(sshItems, 'ssh_cipher_256'),
 			'weak_algorithms': itemListValues(sshItems, 'ssh_weak_algorithms'),
 			'legacy_macs': itemListValues(sshItems, 'ssh_legacy_macs'),
+			# Une valeur par adresse (une sonde par adresse et par run).
+			'servers': sortedUnique(encodeSshServer(item) for item in sshItems),
 		}
 		if {'classical', 'pure'} & set(exposure['ssh']['pqc_kex_status']):
 			exposureFindings.add('SSH_NO_PQC_KEX')

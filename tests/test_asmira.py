@@ -579,6 +579,67 @@ def testExposureEventsWithoutWebAuthHaveNoWebAuthBlock():
 	assert 'web_auth' not in event['asmira']['exposure']
 
 
+def sshItem(ip, status, weak=(), **overrides):
+	return(gradedItem(
+		ip=ip,
+		port22='open',
+		tls_port22='ssh',
+		ssh_banner='SSH-2.0-OpenSSH_9.6',
+		ssh_software='OpenSSH_9.6',
+		ssh_host_key_algorithms=['ssh-ed25519'],
+		ssh_pqc_kex_status=status,
+		ssh_cipher_256=True,
+		ssh_weak_algorithms=list(weak),
+		ssh_legacy_macs=[],
+		**overrides,
+	))
+
+
+def testSshServersKeepTheirOwnStatusPerAddress():
+	event = asmira.buildExposureEvents([
+		sshItem('192.0.2.10', 'hybrid'),
+		sshItem('192.0.2.11', 'classical', ['ssh-rsa']),
+	], '20260731T200000Z-12345678')[0]
+	servers = [asmiraCommon.decodeSshServer(value) for value in event['asmira']['exposure']['ssh']['servers']]
+
+	assert [(server['ip'], server['kex'], server['weak']) for server in servers] == [
+		('192.0.2.10', 'hybrid', []),
+		('192.0.2.11', 'classical', ['ssh-rsa']),
+	]
+	assert servers[0]['cipher_256'] == 'oui' and servers[0]['host_keys'] == ['ssh-ed25519']
+
+
+def testSshServerEncodingRoundTripsMissingValues():
+	value = asmiraCommon.encodeSshServer({'ip': '192.0.2.1', 'ssh_software': 'Bad|Name'})
+
+	assert value == '192.0.2.1|-|Bad/Name|-|-|-|-'
+	assert asmiraCommon.decodeSshServer(value) == {
+		'ip': '192.0.2.1', 'kex': None, 'software': 'Bad/Name', 'cipher_256': None,
+		'host_keys': [], 'weak': [], 'legacy_macs': [],
+	}
+	assert asmiraCommon.decodeSshServer('trop|court') is None
+
+
+@pytest.mark.parametrize('before, after', [
+	# Dégradation SSH : le statut ou les algorithmes d’une adresse changent.
+	({'ssh': ('hybrid', ())}, {'ssh': ('classical', ('ssh-rsa',))}),
+	# Passage du SSO au formulaire local.
+	({'web_auth': 'sso', 'web_auth_idp': 'ADFS'}, {'web_auth': 'local_form'}),
+])
+def testSshAndWebAuthChangesMarkTheEntityUpdated(before, after):
+	def item(values):
+		values = dict(values)
+		ssh = values.pop('ssh', None)
+		return(sshItem('192.0.2.10', *ssh, **values) if ssh else gradedItem(**values))
+
+	previous = asmira.buildExposureEvents([item(before)], '20260731T200000Z-12345678')
+	event = asmira.buildExposureEvents([item(after)], '20260801T200000Z-12345678', previousEvents=previous)[0]
+	unchanged = asmira.buildExposureEvents([item(before)], '20260801T200000Z-12345678', previousEvents=previous)[0]
+
+	assert event['asmira']['exposure']['change'] == 'updated'
+	assert unchanged['asmira']['exposure']['change'] == 'unchanged'
+
+
 def testExposureEventsWithoutSshHaveNoSshBlock():
 	event = asmira.buildExposureEvents([gradedItem()], '20260731T200000Z-12345678')[0]
 

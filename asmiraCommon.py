@@ -14,6 +14,41 @@ from pathlib import Path
 
 DEFAULT_CONFIG_PATH = Path('/etc/asmira/asmira.conf')
 RUN_ID_PATTERN = re.compile(r'^[0-9]{8}T[0-9]{6}Z-[0-9a-f]{8}$')
+# Un serveur SSH par valeur de asmira.exposure.ssh.servers : un FQDN à
+# plusieurs adresses ne mélange ainsi pas leurs statuts. Champs séparés par
+# « | », listes par « , », « - » pour une valeur absente (lu par DISSECT en
+# ES|QL et par asmiraReport).
+SSH_SERVER_FIELDS = ('ip', 'kex', 'software', 'cipher_256', 'host_keys', 'weak', 'legacy_macs')
+
+
+def encodeSshServer(item):
+	def text(value):
+		if isinstance(value, list):
+			value = ','.join(value)
+		elif isinstance(value, bool):
+			value = 'oui' if value else 'non'
+		return(str(value).replace('|', '/') if value not in (None, '') else '-')
+	return('|'.join(text(value) for value in (
+		item.get('ip'),
+		item.get('ssh_pqc_kex_status'),
+		item.get('ssh_software'),
+		item.get('ssh_cipher_256'),
+		item.get('ssh_host_key_algorithms'),
+		item.get('ssh_weak_algorithms'),
+		item.get('ssh_legacy_macs'),
+	)))
+
+
+def decodeSshServer(value):
+	parts = str(value).split('|')
+	if len(parts) != len(SSH_SERVER_FIELDS):
+		return(None)
+	server = {name: (None if part == '-' else part) for name, part in zip(SSH_SERVER_FIELDS, parts)}
+	for name in ('host_keys', 'weak', 'legacy_macs'):
+		server[name] = server[name].split(',') if server[name] else []
+	return(server)
+
+
 FORBIDDEN_CONFIG_NAMES = ('api_key', 'apikey', 'password', 'private_key', 'secret', 'token')
 # Lu une seule fois à l’import : os.umask() modifie l’état global du processus et
 # ne doit pas être appelé depuis les threads de collecte ou d’analyse.

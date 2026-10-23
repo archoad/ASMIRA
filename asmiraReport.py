@@ -19,6 +19,7 @@ from datetime import datetime, timezone
 from email.message import EmailMessage
 
 import asmiraGrade
+from asmiraCommon import decodeSshServer
 
 
 ACTIVE_SOURCES = ('amass', 'dnsx')
@@ -230,34 +231,20 @@ def analyseDomains(events):
 	return(rows)
 
 
-SSH_KEX_ORDER = ('classical', 'pure', 'hybrid_sntrup', 'hybrid')
-
-
 def analyseSsh(events):
-	"""Serveurs SSH comptés par adresse (une machine sert souvent plusieurs FQDN) :
-	statut d’échange de clés le plus faible vu pour l’adresse, algorithmes obsolètes
-	et MAC hérités."""
-	statusByAddress = {}
-	weakAddresses = set()
-	legacyAddresses = set()
+	"""Serveurs SSH comptés par adresse (une machine sert souvent plusieurs FQDN),
+	chacun avec son propre statut : un FQDN à plusieurs adresses ne leur prête
+	pas le pire statut de l’ensemble."""
+	servers = {}
 	for event in events:
-		ssh = exposureOf(event).get('ssh') or {}
-		statuses = ssh.get('pqc_kex_status') or []
-		worst = next((status for status in SSH_KEX_ORDER if status in statuses), 'unknown')
-		for address in ssh.get('ip') or []:
-			previous = statusByAddress.get(address)
-			if previous is None or (worst in SSH_KEX_ORDER and (
-				previous not in SSH_KEX_ORDER or SSH_KEX_ORDER.index(worst) < SSH_KEX_ORDER.index(previous)
-			)):
-				statusByAddress[address] = worst
-			if ssh.get('weak_algorithms'):
-				weakAddresses.add(address)
-			if ssh.get('legacy_macs'):
-				legacyAddresses.add(address)
+		for value in (exposureOf(event).get('ssh') or {}).get('servers') or []:
+			server = decodeSshServer(value)
+			if server and server['ip']:
+				servers[server['ip']] = server
 	return({
-		'kex': Counter(statusByAddress.values()),
-		'weak': len(weakAddresses),
-		'legacy_macs': len(legacyAddresses),
+		'kex': Counter(server['kex'] or 'unknown' for server in servers.values()),
+		'weak': sum(bool(server['weak']) for server in servers.values()),
+		'legacy_macs': sum(bool(server['legacy_macs']) for server in servers.values()),
 	})
 
 

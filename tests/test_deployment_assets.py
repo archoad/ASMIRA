@@ -225,7 +225,9 @@ def testElasticJsonAssetsAreValidAndDashboardIsGlobal():
 		if panel['config'].get('title') == 'Serveurs SSH exposés'
 	)
 	# Une ligne par adresse : la clé d’hôte appartient à la machine, pas au FQDN.
-	assert 'BY Adresse = asmira.exposure.ssh.ip' in sshTable['config']['data_source']['query']
+	# Une ligne par serveur : chaque adresse garde son propre statut.
+	assert 'BY Adresse = ip, kex' in sshTable['config']['data_source']['query']
+	assert 'MV_EXPAND asmira.exposure.ssh.servers' in sshTable['config']['data_source']['query']
 	assert sshTable['config']['metrics'] == [{'column': 'FQDN'}]
 	assert {'column': 'MAC hérités'} in sshTable['config']['rows']
 	webAuthMappings = mappings['asmira']['properties']['exposure']['properties']['web_auth']['properties']

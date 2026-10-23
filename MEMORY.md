@@ -635,3 +635,13 @@ Points techniques retenus :
   champ `asmira.exposure.ssh.legacy_macs`. Le run qui suit le déploiement
   montre des `SSH_WEAK_ALGORITHMS` « corrigés » et des `SSH_LEGACY_MAC`
   « apparus » : artefact de transition.
+- **2026-10-23 — Revue tierce (5 points).** (1) une URL mal formée sur une page
+  faisait échouer le run : `splitUrl` et capture par FQDN dans
+  `analyseWebAuthentication` ; (2) un générateur ou un titre (WordPress,
+  Jenkins…) ne prouve plus une authentification, seul un champ mot de passe ou
+  un chemin de connexion connu ; (3) `asmira.exposure.ssh.servers`, une valeur
+  par adresse (`asmiraCommon.encodeSshServer`, `DISSECT` en ES|QL), pour qu’un
+  FQDN à plusieurs adresses SSH ne leur prête pas le pire statut ; (4)
+  `exposureState` inclut serveurs SSH, type d’authentification et fournisseur ;
+  (5) PEM du seul dernier run : choix documenté, l’historique tient aux statuts
+  calculés, un magasin de certificats par empreinte reste possible.

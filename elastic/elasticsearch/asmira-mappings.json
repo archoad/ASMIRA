@@ -167,7 +167,8 @@
                     "host_key_pqc_status": { "type": "keyword" },
                     "cipher_256": { "type": "boolean" },
                     "weak_algorithms": { "type": "keyword" },
-                    "legacy_macs": { "type": "keyword" }
+                    "legacy_macs": { "type": "keyword" },
+                    "servers": { "type": "keyword" }
                   }
                 },
                 "web_auth": {

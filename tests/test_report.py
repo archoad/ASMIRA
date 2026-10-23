@@ -3,6 +3,7 @@ from types import SimpleNamespace
 import pytest
 
 import asmira
+import asmiraCommon
 import asmiraReport
 
 
@@ -294,29 +295,30 @@ def testEmailFailureDoesNotFailTheRun(tmp_path, monkeypatch, capsys):
 	assert 'bilan non envoyé par e-mail' in capsys.readouterr().err
 
 
-def testSshServersAreCountedPerAddressWithWeakestStatus():
-	def sshEvent(name, addresses, statuses, weak=(), legacy=()):
+def testSshServersAreCountedPerAddressWithTheirOwnStatus():
+	def sshEvent(name, *servers):
 		return({
 			'server': {'domain': name, 'registered_domain': 'example.com'},
-			'asmira': {'exposure': {'present': True, 'ssh': {
-				'ip': list(addresses),
-				'pqc_kex_status': list(statuses),
-				'weak_algorithms': list(weak),
-				'legacy_macs': list(legacy),
-			}, 'tls': {}}},
+			'asmira': {'exposure': {'present': True, 'ssh': {'servers': [
+				asmiraCommon.encodeSshServer({
+					'ip': ip, 'ssh_pqc_kex_status': status,
+					'ssh_weak_algorithms': list(weak), 'ssh_legacy_macs': list(legacy),
+				})
+				for ip, status, weak, legacy in servers
+			]}, 'tls': {}}},
 		})
 
 	result = asmiraReport.analyseSsh([
-		sshEvent('a.example.com', ['192.0.2.1'], ['hybrid']),
+		sshEvent('a.example.com', ('192.0.2.1', 'hybrid', (), ())),
 		# Même machine vue par un autre nom : comptée une fois.
-		sshEvent('b.example.com', ['192.0.2.1'], ['hybrid']),
-		sshEvent('c.example.com', ['192.0.2.2'], ['hybrid_sntrup'], ['ssh-rsa']),
-		sshEvent('d.example.com', ['192.0.2.3'], ['classical']),
-		sshEvent('e.example.com', ['192.0.2.3'], ['hybrid'], legacy=['hmac-sha1']),
+		sshEvent('b.example.com', ('192.0.2.1', 'hybrid', (), ())),
+		sshEvent('c.example.com', ('192.0.2.2', 'hybrid_sntrup', ('ssh-rsa',), ())),
+		# Un FQDN sur deux adresses : chacune garde son statut.
+		sshEvent('d.example.com', ('192.0.2.3', 'classical', ('ssh-rsa',), ()), ('192.0.2.4', 'hybrid', (), ('hmac-sha1',))),
 	])
 
-	assert result['kex'] == {'hybrid': 1, 'hybrid_sntrup': 1, 'classical': 1}
-	assert result['weak'] == 1
+	assert result['kex'] == {'hybrid': 2, 'hybrid_sntrup': 1, 'classical': 1}
+	assert result['weak'] == 2
 	assert result['legacy_macs'] == 1
 
 

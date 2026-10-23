@@ -1240,10 +1240,21 @@ def interactiveHttpSchemes(httpAuth):
 	])
 
 
+def splitUrl(url):
+	"""Découpage d’une URL lue sur une page, ou None si elle est mal formée
+	(IPv6 invalide, port hors bornes) : une page ne doit pas faire échouer le run."""
+	try:
+		parts = urlsplit(url or '')
+		parts.port
+	except (ValueError, TypeError):
+		return(None)
+	return(parts)
+
+
 def cleanUrl(url):
 	"""URL sans requête ni fragment : jetons OAuth, state et nonce n’y restent pas."""
-	parts = urlsplit(url or '')
-	if parts.scheme not in ('http', 'https') or not parts.hostname:
+	parts = splitUrl(url)
+	if parts is None or parts.scheme not in ('http', 'https') or not parts.hostname:
 		return(None)
 	port = f':{parts.port}' if parts.port and parts.port not in (80, 443) else ''
 	return(f'{parts.scheme}://{parts.hostname}{port}{parts.path or "/"}')
@@ -1252,8 +1263,8 @@ def cleanUrl(url):
 def identifyIdp(url):
 	"""(fournisseur, nom d’hôte) si l’URL appartient à un fournisseur d’identité
 	connu ou porte une requête de fédération, sinon (None, None)."""
-	parts = urlsplit(url or '')
-	host = (parts.hostname or '').lower()
+	parts = splitUrl(url)
+	host = ((parts.hostname if parts else None) or '').lower()
 	if not host:
 		return(None, None)
 	for name, hostPattern, pathPattern in WEB_AUTH_IDPS:
@@ -1271,15 +1282,20 @@ def identifyIdp(url):
 
 
 def identifyProduct(url, title='', generator=''):
-	path = urlsplit(url or '').path or '/'
-	for name, pathPattern, titlePattern in WEB_AUTH_PRODUCTS:
+	"""(produit, page de connexion) : seul un chemin de connexion connu prouve
+	une authentification ; un titre ou le générateur ne fait que nommer le
+	produit (un site WordPress public n’authentifie personne)."""
+	parts = splitUrl(url)
+	path = ((parts.path if parts else None) or '/')
+	for name, pathPattern, unused in WEB_AUTH_PRODUCTS:
 		if pathPattern is not None and pathPattern.search(path):
-			return(name)
+			return(name, True)
+	for name, unused, titlePattern in WEB_AUTH_PRODUCTS:
 		if titlePattern is not None and titlePattern.search((title or '').strip()):
-			return(name)
+			return(name, False)
 	if re.match(r'^WordPress', generator or ''):
-		return('WordPress')
-	return(None)
+		return('WordPress', False)
+	return(None, False)
 
 
 def idpIsCorporate(url, corporateIdp):
@@ -1287,7 +1303,9 @@ def idpIsCorporate(url, corporateIdp):
 	(« hôte » ou « hôte/chemin »), False sinon, None si aucun n’est déclaré."""
 	if not corporateIdp:
 		return(None)
-	parts = urlsplit(url or '')
+	parts = splitUrl(url)
+	if parts is None:
+		return(False)
 	location = f'{(parts.hostname or "").lower()}{parts.path or "/"}'
 	for prefix in corporateIdp:
 		prefix = prefix.strip().lower().rstrip('/')
@@ -1319,7 +1337,7 @@ def classifyWebAuth(httpAuth, pages, corporateIdp=()):
 		return(result)
 	result['web_auth'] = 'none'
 	for index, page in enumerate(pages):
-		product = identifyProduct(page.get('url'), page.get('title'), page.get('generator'))
+		product, loginPage = identifyProduct(page.get('url'), page.get('title'), page.get('generator'))
 		result['web_auth_product'] = result['web_auth_product'] or product
 		idpUrl = next(
 			(
@@ -1338,7 +1356,7 @@ def classifyWebAuth(httpAuth, pages, corporateIdp=()):
 				'web_auth_idp_corporate': idpIsCorporate(idpUrl, corporateIdp),
 				'web_auth_url': cleanUrl(idpUrl),
 			})
-		elif page.get('password_fields') or product:
+		elif page.get('password_fields') or loginPage:
 			result.update({'web_auth': 'local_form', 'web_auth_url': cleanUrl(page.get('url'))})
 		else:
 			continue
@@ -1358,7 +1376,8 @@ def chooseLoginLink(page, registeredDomain):
 	aucun lien externe quelconque n’est suivi."""
 	registeredDomain = (registeredDomain or '').lower()
 	for url in page.get('login_links') or []:
-		host = (urlsplit(url).hostname or '').lower()
+		parts = splitUrl(url)
+		host = ((parts.hostname if parts else None) or '').lower()
 		sameSite = registeredDomain and (host == registeredDomain or host.endswith('.' + registeredDomain))
 		if sameSite or identifyIdp(url)[0]:
 			return(url)
@@ -1494,7 +1513,13 @@ def analyseWebAuthentication(items, workers=2, corporateIdp=()):
 		results = {}
 		for future in as_completed(futureMap):
 			host = futureMap[future]
-			results[host] = future.result()
+			try:
+				results[host] = future.result()
+			# Une page imprévue ne doit jamais faire échouer le run : le FQDN
+			# reste indéterminé et l’erreur est journalisée.
+			except Exception as error:
+				print(f'(web) {host} : erreur {type(error).__name__}: {error}')
+				results[host] = {**classifyWebAuth(None, []), 'web_auth_ip': pending[host][0]['ip']}
 			print(f'(web) {host} --> {results[host]["web_auth"]}')
 	for item in items:
 		host = hostsByItem.get(id(item))
