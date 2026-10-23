@@ -247,6 +247,23 @@ def trackFindings(tls, previousFindings, previousSince, previousTimestamp, times
 	tls['findings_resolved'] = sorted(previous - current)
 
 
+def unobservedFindingPrefixes(exposure):
+	"""Familles de constats dont l’observation a échoué à ce run : page HTTPS
+	non lue (ou analyse indisponible), port 22 ouvert sans bannière SSH. Leurs
+	constats restent en attente d’une observation probante, sans être déclarés
+	corrigés."""
+	prefixes = []
+	webAuth = exposure.get('web_auth')
+	if (webAuth or {}).get('type') == 'unknown' or (
+		webAuth is None and exposure.get('tls', {}).get('certificate_sha256')
+	):
+		prefixes.append('WEB_AUTH_')
+	port22 = exposure.get('port', {}).get('22', {})
+	if 'open' in (port22.get('state') or []) and 'ssh' not in exposure and 'ssh' not in (port22.get('tls') or []):
+		prefixes.append('SSH_')
+	return(prefixes)
+
+
 def attachDnsContext(items, inventory):
 	# Le CAA est copié dans chaque observation : il suit ainsi raw.endpoints et
 	# reste disponible quand un run ultérieur recalcule l’état précédent.
@@ -479,6 +496,7 @@ def exposureState(event):
 		'ssh_servers': eventValues(event, 'asmira', 'exposure', 'ssh', 'servers'),
 		'web_auth_type': eventValues(event, 'asmira', 'exposure', 'web_auth', 'type'),
 		'web_auth_idp': eventValues(event, 'asmira', 'exposure', 'web_auth', 'idp'),
+		'web_auth_idp_corporate': eventValues(event, 'asmira', 'exposure', 'web_auth', 'idp_corporate'),
 	})
 
 
@@ -832,6 +850,7 @@ def buildExposureEvents(items, runId, previousEvents=None, completeObservation=T
 	previousByFqdn = {}
 	previousPresentByFqdn = {}
 	previousSinceByFqdn = {}
+	previousPendingByFqdn = {}
 	for fqdn, fqdnEvents in previousEventsByFqdn.items():
 		presentEvents = [
 			event
@@ -862,6 +881,11 @@ def buildExposureEvents(items, runId, previousEvents=None, completeObservation=T
 		previousByFqdn[fqdn] = previous
 		previousPresentByFqdn[fqdn] = bool(presentEvents)
 		latest = max(stateEvents, key=lambda event: event.get('@timestamp', ''))
+		# Constats maintenus en attente au run précédent : l’état recalculé depuis
+		# raw.endpoints ne les connaît pas, l’événement exporté si.
+		previousPendingByFqdn[fqdn] = set(
+			latest.get('asmira', {}).get('exposure', {}).get('tls', {}).get('findings_pending') or []
+		)
 		previousSinceByFqdn[fqdn] = (
 			parseFindingsSince(
 				latest.get('asmira', {}).get('exposure', {}).get('tls', {}).get('findings_since')
@@ -903,9 +927,23 @@ def buildExposureEvents(items, runId, previousEvents=None, completeObservation=T
 			if 'grade' in currentTls and previousGrade and previousGrade != currentTls['grade']:
 				currentTls['grade_changed'] = True
 				currentTls['previous_grade'] = previousGrade
+			previousFindings = set(
+				previous.get('asmira', {}).get('exposure', {}).get('tls', {}).get('findings') or []
+			) | previousPendingByFqdn.get(fqdn, set())
+			prefixes = unobservedFindingPrefixes(event['asmira']['exposure'])
+			pending = {code for code in previousFindings if code.startswith(tuple(prefixes))} if prefixes else set()
+			if pending:
+				addFindings(currentTls, pending)
+			currentTls['findings_pending'] = sorted(pending)
+			# Une observation manquée ne change pas l’état : la valeur précédente vaut.
+			if 'WEB_AUTH_' in prefixes:
+				for name in ('web_auth_type', 'web_auth_idp', 'web_auth_idp_corporate'):
+					currentState[name] = previousState[name]
+			if 'SSH_' in prefixes:
+				currentState['ssh_servers'] = previousState['ssh_servers']
 			trackFindings(
 				currentTls,
-				previous.get('asmira', {}).get('exposure', {}).get('tls', {}).get('findings'),
+				sorted(previousFindings),
 				*previousSinceByFqdn.get(fqdn, ({}, None)),
 				event['@timestamp'],
 			)

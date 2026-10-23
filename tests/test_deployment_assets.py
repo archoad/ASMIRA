@@ -226,7 +226,7 @@ def testElasticJsonAssetsAreValidAndDashboardIsGlobal():
 	)
 	# Une ligne par adresse : la clé d’hôte appartient à la machine, pas au FQDN.
 	# Une ligne par serveur : chaque adresse garde son propre statut.
-	assert 'BY Adresse = ip, kex' in sshTable['config']['data_source']['query']
+	assert 'BY Adresse = ip | DISSECT dernier' in sshTable['config']['data_source']['query']
 	assert 'MV_EXPAND asmira.exposure.ssh.servers' in sshTable['config']['data_source']['query']
 	assert sshTable['config']['metrics'] == [{'column': 'FQDN'}]
 	assert {'column': 'MAC hérités'} in sshTable['config']['rows']

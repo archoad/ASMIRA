@@ -645,3 +645,11 @@ Points techniques retenus :
   `exposureState` inclut serveurs SSH, type d’authentification et fournisseur ;
   (5) PEM du seul dernier run : choix documenté, l’historique tient aux statuts
   calculés, un magasin de certificats par empreinte reste possible.
+- **2026-10-23 — Revue tierce, second passage.** Une observation manquée (page
+  `unknown` ou analyse indisponible, port 22 ouvert sans bannière) ne déclare
+  plus les constats `WEB_AUTH_*` ou `SSH_*` corrigés : ils sont maintenus dans
+  `tls.findings_pending` (relu depuis l’événement exporté, car l’état recalculé
+  depuis `raw.endpoints` ne les connaît pas) et l’entité reste `unchanged`.
+  `exposureState` inclut `web_auth.idp_corporate`. Panneaux SSH : par adresse,
+  seule l’observation la plus récente (`MAX` de « horodatage#serveur »), pour
+  qu’un run partiel ne produise pas deux lignes pour une même adresse.

@@ -640,6 +640,55 @@ def testSshAndWebAuthChangesMarkTheEntityUpdated(before, after):
 	assert unchanged['asmira']['exposure']['change'] == 'unchanged'
 
 
+def runSequence(*itemLists):
+	events = []
+	for index, items in enumerate(itemLists):
+		events = asmira.buildExposureEvents(items, f'2026080{index + 1}T200000Z-12345678', previousEvents=events)
+	return(events[0])
+
+
+def testUnreadPortalKeepsItsFindingPending():
+	localForm = [gradedItem(web_auth='local_form')]
+	unread = [gradedItem(web_auth='unknown')]
+
+	once = runSequence(localForm, unread)
+	twice = runSequence(localForm, unread, unread)
+	fixed = runSequence(localForm, unread, [gradedItem(web_auth='sso', web_auth_idp='ADFS')])
+
+	for event in (once, twice):
+		tls = event['asmira']['exposure']['tls']
+		# Une page non lue ne prouve pas la correction : le constat attend.
+		assert 'WEB_AUTH_LOCAL_FORM' in tls['findings']
+		assert tls['findings_pending'] == ['WEB_AUTH_LOCAL_FORM']
+		assert tls['findings_resolved'] == [] and tls['findings_opened'] == []
+		assert event['asmira']['exposure']['change'] == 'unchanged'
+	assert any(value.startswith('WEB_AUTH_LOCAL_FORM@2026-07-31') for value in twice['asmira']['exposure']['tls']['findings_since'])
+	fixedTls = fixed['asmira']['exposure']['tls']
+	assert fixedTls['findings_resolved'] == ['WEB_AUTH_LOCAL_FORM']
+	assert fixedTls['findings_pending'] == []
+
+
+def testSilentSshPortKeepsSshFindingsPending():
+	silent = gradedItem(port22='open')
+	event = runSequence([sshItem('192.0.2.10', 'classical')], [silent])
+	tls = event['asmira']['exposure']['tls']
+
+	assert 'SSH_NO_PQC_KEX' in tls['findings']
+	assert tls['findings_pending'] == ['SSH_NO_PQC_KEX']
+	closed = runSequence([sshItem('192.0.2.10', 'classical')], [gradedItem(port22='closed')])
+	assert closed['asmira']['exposure']['tls']['findings_resolved'] == ['SSH_NO_PQC_KEX']
+
+
+def testCorporateIdpChangeMarksEntityUpdated():
+	corporate = [gradedItem(web_auth='sso', web_auth_idp='Okta', web_auth_idp_corporate=True)]
+	external = [gradedItem(web_auth='sso', web_auth_idp='Okta', web_auth_idp_corporate=False)]
+
+	event = runSequence(corporate, external)
+
+	assert event['asmira']['exposure']['change'] == 'updated'
+	assert event['asmira']['exposure']['tls']['findings_opened'] == ['WEB_AUTH_EXTERNAL_IDP']
+
+
 def testExposureEventsWithoutSshHaveNoSshBlock():
 	event = asmira.buildExposureEvents([gradedItem()], '20260731T200000Z-12345678')[0]
 

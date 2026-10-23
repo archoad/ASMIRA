@@ -254,6 +254,7 @@
                     "findings_since": { "type": "keyword" },
                     "findings_opened": { "type": "keyword" },
                     "findings_resolved": { "type": "keyword" },
+                    "findings_pending": { "type": "keyword" },
                     "max_severity": { "type": "keyword" }
                   }
                 },
