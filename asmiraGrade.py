@@ -69,7 +69,11 @@ FINDINGS = {
 	'PQC_KEX_NOT_HYBRID': ('medium', None, 'ML-KEM est proposé seul : l’ANSSI impose de l’associer à un algorithme classique. Proposer un groupe hybride (X25519MLKEM768, SecP256r1MLKEM768 ou SecP384r1MLKEM1024).'),
 	'RDP_EXPOSED': ('high', None, 'Le bureau à distance (RDP, 3389) est exposé sur Internet : le placer derrière un VPN ou une passerelle d’accès.'),
 	'SSH_NO_PQC_KEX': ('low', None, 'Le serveur SSH ne propose aucun échange de clés hybride : activer mlkem768x25519-sha256 (OpenSSH ≥ 9.9) contre le déchiffrement différé.'),
-	'SSH_WEAK_ALGORITHMS': ('medium', None, 'Le serveur SSH propose encore des algorithmes obsolètes (SHA-1, CBC, ssh-dss, groupes Diffie-Hellman faibles…) : les retirer de sa configuration.'),
+	'SSH_WEAK_ALGORITHMS': ('medium', None, 'Le serveur SSH propose encore des algorithmes obsolètes (échanges de clés et signatures SHA-1, CBC, ssh-dss, groupes Diffie-Hellman faibles, MAC MD5…) : les retirer de sa configuration.'),
+	'SSH_LEGACY_MAC': ('low', None, 'Le serveur SSH propose encore des MAC hérités (hmac-sha1, umac-64), présents dans la configuration par défaut d’OpenSSH et sans attaque pratique connue : les retirer au profit des MAC SHA-2 en mode etm.'),
+	'WEB_AUTH_HTTP': ('high', None, 'La page d’accueil exige une authentification HTTP native (Basic, NTLM, Negotiate) : aucun second facteur possible, la placer derrière le fournisseur d’identité de l’organisation.'),
+	'WEB_AUTH_LOCAL_FORM': ('medium', None, 'Le site authentifie lui-même ses utilisateurs (formulaire local) : MFA non prouvé, le déléguer au fournisseur d’identité de l’organisation ou vérifier qu’il impose un second facteur.'),
+	'WEB_AUTH_EXTERNAL_IDP': ('low', None, 'L’authentification est déléguée à un fournisseur d’identité qui n’est pas celui de l’organisation : la politique MFA y échappe à sa gouvernance.'),
 	'CLEARTEXT_SERVICE': ('medium', None, 'Un service exposé n’offre pas de chiffrement (TLS ou STARTTLS) : l’activer ou le fermer.'),
 	'CAA_ISSUER_NOT_AUTHORIZED': ('high', None, 'Le CAA n’autorise pas l’autorité qui a émis le certificat actuel : le prochain renouvellement échouera. Aligner le CAA ou changer d’autorité.'),
 }

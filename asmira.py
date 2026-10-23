@@ -771,11 +771,41 @@ def buildFqdnObservation(items, runId):
 			'host_key_pqc_status': itemValues(sshItems, 'ssh_host_key_pqc_status'),
 			'cipher_256': itemValues(sshItems, 'ssh_cipher_256'),
 			'weak_algorithms': itemListValues(sshItems, 'ssh_weak_algorithms'),
+			'legacy_macs': itemListValues(sshItems, 'ssh_legacy_macs'),
 		}
 		if {'classical', 'pure'} & set(exposure['ssh']['pqc_kex_status']):
 			exposureFindings.add('SSH_NO_PQC_KEX')
 		if exposure['ssh']['weak_algorithms']:
 			exposureFindings.add('SSH_WEAK_ALGORITHMS')
+		if exposure['ssh']['legacy_macs']:
+			exposureFindings.add('SSH_LEGACY_MAC')
+	# Authentification de la page d’accueil, observée une fois par FQDN : le MFA
+	# n’est pas visible de l’extérieur, seul l’endroit où il se décide l’est.
+	webAuthItem = next((item for item in items if item.get('web_auth')), None)
+	if webAuthItem is not None:
+		exposure['web_auth'] = {
+			'type': webAuthItem['web_auth'],
+			'http_schemes': webAuthItem.get('web_auth_http_schemes') or [],
+			'idp': webAuthItem.get('web_auth_idp'),
+			'idp_host': webAuthItem.get('web_auth_idp_host'),
+			'idp_corporate': webAuthItem.get('web_auth_idp_corporate'),
+			'product': webAuthItem.get('web_auth_product'),
+			'mfa_hints': webAuthItem.get('web_auth_mfa_hints') or [],
+			'url': webAuthItem.get('web_auth_url'),
+			'login_link': bool(webAuthItem.get('web_auth_login_link')),
+			'title': webAuthItem.get('web_auth_title'),
+			'site_url': f'https://{fqdn}/',
+		}
+		webAuth = exposure['web_auth']
+		# Le tableau Lens (last_value) n’affiche qu’une valeur d’un champ multiple.
+		webAuth['http_schemes_text'] = ', '.join(webAuth['http_schemes']) or None
+		webAuth['mfa_hints_text'] = ', '.join(webAuth['mfa_hints']) or None
+		if webAuth['type'] == 'http':
+			exposureFindings.add('WEB_AUTH_HTTP')
+		elif webAuth['type'] == 'local_form':
+			exposureFindings.add('WEB_AUTH_LOCAL_FORM')
+		elif webAuth['type'] == 'sso' and webAuth['idp_corporate'] is False:
+			exposureFindings.add('WEB_AUTH_EXTERNAL_IDP')
 	if exposureFindings:
 		addFindings(tls, exposureFindings)
 	return(event)
@@ -1154,6 +1184,8 @@ def run(config, runId=None, maxEndpoints=None, discoveryOnly=False):
 				netcat=config.netcatPath,
 				nmap=config.nmapPath,
 				openssl=config.opensslPath,
+				chromium=config.chromiumPath,
+				chromedriver=config.chromedriverPath,
 			)
 			webTLS.PICTURES_DIR = config.picturesDir
 			webTLS.testTools()
@@ -1171,6 +1203,9 @@ def run(config, runId=None, maxEndpoints=None, discoveryOnly=False):
 				subprocessBudget=config.subprocessBudget,
 				checkpointEvery=config.checkpointEvery,
 				maxEndpoints=effectiveMaxEndpoints,
+				webAuth=config.webAuth,
+				webAuthWorkers=config.webAuthWorkers,
+				corporateIdp=config.corporateIdp,
 			)
 			attachDnsContext(exposureResult['output'], discoveryResult.get('inventory'))
 			incompleteSources = [

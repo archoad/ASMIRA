@@ -1334,7 +1334,7 @@
     {
       "type": "markdown",
       "config": {
-        "content": "### SSH\nConcernant SSH et la PQC, l'ANSSI priorise l’hybridation de l’échange de clés, puis de l’authentification. Le protocole **Hybride ML-KEM** (`mlkem768x25519-sha256`) est la cible, **NTRU Prime** (`sntrup761x25519`) est hybride mais non normalisé. Sans échange hybride, le constat est `SSH_NO_PQC_KEX`. `SSH_WEAK_ALGORITHMS` signale les algorithmes obsolètes encore proposés (SHA-1, CBC, `ssh-dss`…).",
+        "content": "### SSH\nConcernant SSH et la PQC, l'ANSSI priorise l’hybridation de l’échange de clés, puis de l’authentification. Le protocole **Hybride ML-KEM** (`mlkem768x25519-sha256`) est la cible, **NTRU Prime** (`sntrup761x25519`) est hybride mais non normalisé. Sans échange hybride, le constat est `SSH_NO_PQC_KEX`. `SSH_WEAK_ALGORITHMS` signale les algorithmes obsolètes encore proposés (échanges de clés SHA-1, CBC, `ssh-dss`…) ; `SSH_LEGACY_MAC` (faible) signale à part `hmac-sha1` et `umac-64`, encore proposés par défaut par OpenSSH.",
         "hide_border": true,
         "settings": {
           "open_links_in_new_tab": true
@@ -1444,7 +1444,7 @@
         "title": "Serveurs SSH exposés",
         "data_source": {
           "type": "esql",
-          "query": "FROM asmira-exposure-current | WHERE asmira.exposure.ssh.ip IS NOT NULL | MV_EXPAND asmira.exposure.ssh.ip | STATS FQDN = COUNT_DISTINCT(server.domain), noms = VALUES(server.domain), logiciel = VALUES(asmira.exposure.ssh.software), kex = VALUES(asmira.exposure.ssh.pqc_kex_status), cleHote = VALUES(asmira.exposure.ssh.host_key_algorithms), cle256 = VALUES(asmira.exposure.ssh.cipher_256), obsoletes = VALUES(asmira.exposure.ssh.weak_algorithms), domaine = VALUES(server.registered_domain) BY Adresse = asmira.exposure.ssh.ip | EVAL `Échange de clés` = CASE(MV_CONCAT(kex, \",\") LIKE \"*classical*\", \"Classique : aucun échange de clés post-quantique\", MV_CONCAT(kex, \",\") LIKE \"*pure*\", \"ML-KEM seul (non hybride)\", MV_CONCAT(kex, \",\") LIKE \"*hybrid_sntrup*\", \"Hybride NTRU Prime (non normalisé)\", MV_CONCAT(kex, \",\") LIKE \"*hybrid*\", \"Hybride ML-KEM (recommandé par l’ANSSI)\", \"Indéterminé\"), Rang = CASE(MV_CONCAT(kex, \",\") LIKE \"*classical*\", 0, MV_CONCAT(kex, \",\") LIKE \"*pure*\", 1, MV_CONCAT(kex, \",\") LIKE \"*sntrup*\", 2, 3), Logiciel = MV_CONCAT(logiciel, \", \"), Domaine = MV_CONCAT(domaine, \", \"), `Noms (extrait)` = MV_CONCAT(MV_SLICE(MV_SORT(noms), 0, 4), \", \"), `Clé d’hôte` = MV_CONCAT(cleHote, \", \"), `Chiffrement 256 bits` = CASE(MV_MIN(cle256) == true, \"Oui\", MV_MAX(cle256) == true, \"Selon l’adresse\", \"Non\"), `Algorithmes obsolètes` = COALESCE(MV_CONCAT(obsoletes, \", \"), \"aucun\") | SORT Rang ASC, FQDN DESC | KEEP Adresse, Domaine, `Noms (extrait)`, Logiciel, `Échange de clés`, `Clé d’hôte`, `Chiffrement 256 bits`, `Algorithmes obsolètes`, FQDN | LIMIT 500"
+          "query": "FROM asmira-exposure-current | WHERE asmira.exposure.ssh.ip IS NOT NULL | MV_EXPAND asmira.exposure.ssh.ip | STATS FQDN = COUNT_DISTINCT(server.domain), noms = VALUES(server.domain), logiciel = VALUES(asmira.exposure.ssh.software), kex = VALUES(asmira.exposure.ssh.pqc_kex_status), cleHote = VALUES(asmira.exposure.ssh.host_key_algorithms), cle256 = VALUES(asmira.exposure.ssh.cipher_256), obsoletes = VALUES(asmira.exposure.ssh.weak_algorithms), herites = VALUES(asmira.exposure.ssh.legacy_macs), domaine = VALUES(server.registered_domain) BY Adresse = asmira.exposure.ssh.ip | EVAL `Échange de clés` = CASE(MV_CONCAT(kex, \",\") LIKE \"*classical*\", \"Classique : aucun échange de clés post-quantique\", MV_CONCAT(kex, \",\") LIKE \"*pure*\", \"ML-KEM seul (non hybride)\", MV_CONCAT(kex, \",\") LIKE \"*hybrid_sntrup*\", \"Hybride NTRU Prime (non normalisé)\", MV_CONCAT(kex, \",\") LIKE \"*hybrid*\", \"Hybride ML-KEM (recommandé par l’ANSSI)\", \"Indéterminé\"), Rang = CASE(MV_CONCAT(kex, \",\") LIKE \"*classical*\", 0, MV_CONCAT(kex, \",\") LIKE \"*pure*\", 1, MV_CONCAT(kex, \",\") LIKE \"*sntrup*\", 2, 3), Logiciel = MV_CONCAT(logiciel, \", \"), Domaine = MV_CONCAT(domaine, \", \"), `Noms (extrait)` = MV_CONCAT(MV_SLICE(MV_SORT(noms), 0, 4), \", \"), `Clé d’hôte` = MV_CONCAT(cleHote, \", \"), `Chiffrement 256 bits` = CASE(MV_MIN(cle256) == true, \"Oui\", MV_MAX(cle256) == true, \"Selon l’adresse\", \"Non\"), `Algorithmes obsolètes` = COALESCE(MV_CONCAT(obsoletes, \", \"), \"aucun\"), `MAC hérités` = COALESCE(MV_CONCAT(herites, \", \"), \"aucun\") | SORT Rang ASC, FQDN DESC | KEEP Adresse, Domaine, `Noms (extrait)`, Logiciel, `Échange de clés`, `Clé d’hôte`, `Chiffrement 256 bits`, `Algorithmes obsolètes`, `MAC hérités`, FQDN | LIMIT 500"
         },
         "rows": [
           {
@@ -1470,6 +1470,9 @@
           },
           {
             "column": "Algorithmes obsolètes"
+          },
+          {
+            "column": "MAC hérités"
           }
         ],
         "metrics": [
@@ -1488,7 +1491,7 @@
     {
       "type": "markdown",
       "config": {
-        "content": "### Surface d’exposition\nPorts sondés : 22, 25, 80, 443, 465, 587, 993, 995, 3389, 8080 et 8443. Pour chaque port ouvert, Asmira vérifie le chiffrement : TLS direct (443, 465, 993, 995, 8080, 8443), STARTTLS (25, 587), CredSSP/TLS ou chiffrement RDP natif (3389). Le port 22 n’est classé SSH que si le serveur présente une bannière SSH (voir la section SSH). Un port n’est classé en clair que si le service a répondu sans chiffrement. Un port de CDN muet reste indéterminé. Seul le port 80 est du HTTP en clair par nature et ne compte pas comme service non chiffré. Un 8080 en clair n’est compté que s’il ne redirige pas vers HTTPS (**Redirection HTTPS**), car HSTS conserve le port.",
+        "content": "### Authentification web\nChaque page d’accueil HTTPS est chargée une fois par FQDN, sans rien saisir. Le second facteur n’est demandé qu’après un mot de passe valide : il n’est pas observable de l’extérieur. Le panneau montre donc où se décide l’authentification. Un portail délégué au **fournisseur d’identité de l’organisation** hérite de sa politique MFA ; un **formulaire local** ne prouve rien (`WEB_AUTH_LOCAL_FORM`) ; l’**authentification HTTP native** n’en permet aucun (`WEB_AUTH_HTTP`). Les indices MFA (clé d’accès, champ de code à usage unique) ne sont relevés que s’ils sont visibles.",
         "hide_border": true,
         "settings": {
           "open_links_in_new_tab": true
@@ -1497,6 +1500,270 @@
       "grid": {
         "x": 0,
         "y": 247,
+        "w": 48,
+        "h": 5
+      }
+    },
+    {
+      "type": "vis",
+      "config": {
+        "type": "pie",
+        "title": "Authentification des pages d’accueil",
+        "data_source": {
+          "type": "esql",
+          "query": "FROM asmira-exposure-current | WHERE asmira.exposure.web_auth.type IS NOT NULL | EVAL Authentification = CASE(asmira.exposure.web_auth.type == \"http\", \"HTTP natif (Basic, NTLM…) : MFA impossible\", asmira.exposure.web_auth.type == \"local_form\", \"Formulaire local : MFA non prouvé\", asmira.exposure.web_auth.type == \"sso\" AND asmira.exposure.web_auth.idp_corporate == true, \"Fournisseur d’identité de l’organisation\", asmira.exposure.web_auth.type == \"sso\" AND asmira.exposure.web_auth.idp_corporate == false, \"Fournisseur d’identité externe\", asmira.exposure.web_auth.type == \"sso\", \"Fournisseur d’identité\", asmira.exposure.web_auth.type == \"none\", \"Sans authentification\", \"Indéterminé (page non chargée)\") | STATS FQDN = COUNT(*) BY Authentification"
+        },
+        "metrics": [
+          {
+            "column": "FQDN"
+          }
+        ],
+        "group_by": [
+          {
+            "column": "Authentification",
+            "color": {
+              "mode": "categorical",
+              "palette": "default",
+              "mapping": [
+                {
+                  "values": [
+                    "Fournisseur d’identité de l’organisation"
+                  ],
+                  "color": {
+                    "type": "color_code",
+                    "value": "#54B399"
+                  }
+                },
+                {
+                  "values": [
+                    "Fournisseur d’identité"
+                  ],
+                  "color": {
+                    "type": "color_code",
+                    "value": "#6DCCB1"
+                  }
+                },
+                {
+                  "values": [
+                    "Fournisseur d’identité externe"
+                  ],
+                  "color": {
+                    "type": "color_code",
+                    "value": "#D6BF57"
+                  }
+                },
+                {
+                  "values": [
+                    "Formulaire local : MFA non prouvé"
+                  ],
+                  "color": {
+                    "type": "color_code",
+                    "value": "#DA8B45"
+                  }
+                },
+                {
+                  "values": [
+                    "HTTP natif (Basic, NTLM…) : MFA impossible"
+                  ],
+                  "color": {
+                    "type": "color_code",
+                    "value": "#E7664C"
+                  }
+                },
+                {
+                  "values": [
+                    "Sans authentification"
+                  ],
+                  "color": {
+                    "type": "color_code",
+                    "value": "#D3DAE6"
+                  }
+                },
+                {
+                  "values": [
+                    "Indéterminé (page non chargée)"
+                  ],
+                  "color": {
+                    "type": "color_code",
+                    "value": "#98A2B3"
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "grid": {
+        "x": 0,
+        "y": 252,
+        "w": 16,
+        "h": 11
+      }
+    },
+    {
+      "type": "vis",
+      "config": {
+        "type": "xy",
+        "title": "Fournisseurs d’identité et portails reconnus",
+        "axis": {
+          "x": {
+            "title": {
+              "visible": false
+            }
+          },
+          "y": {
+            "title": {
+              "visible": false
+            }
+          }
+        },
+        "layers": [
+          {
+            "type": "bar_horizontal",
+            "data_source": {
+              "type": "esql",
+              "query": "FROM asmira-exposure-current | WHERE asmira.exposure.web_auth.type IN (\"sso\", \"local_form\", \"http\") | EVAL Solution = COALESCE(asmira.exposure.web_auth.idp, asmira.exposure.web_auth.product, CASE(asmira.exposure.web_auth.type == \"http\", CONCAT(\"HTTP \", MV_CONCAT(asmira.exposure.web_auth.http_schemes, \"/\")), \"Formulaire non identifié\")) | STATS FQDN = COUNT(*) BY Solution | SORT FQDN DESC | LIMIT 15"
+            },
+            "x": {
+              "column": "Solution"
+            },
+            "y": [
+              {
+                "column": "FQDN"
+              }
+            ]
+          }
+        ]
+      },
+      "grid": {
+        "x": 16,
+        "y": 252,
+        "w": 20,
+        "h": 11
+      }
+    },
+    {
+      "type": "vis",
+      "config": {
+        "type": "metric",
+        "title": "Portails délégués au fournisseur d’identité",
+        "data_source": {
+          "type": "esql",
+          "query": "FROM asmira-exposure-current | WHERE asmira.exposure.web_auth.type IN (\"sso\", \"local_form\", \"http\") | STATS portails = COUNT(*), delegues = SUM(CASE(asmira.exposure.web_auth.type == \"sso\" AND COALESCE(asmira.exposure.web_auth.idp_corporate, true) == true, 1, 0)) | EVAL `Part des portails authentifiés (%)` = ROUND(100.0 * delegues / portails, 1) | KEEP `Part des portails authentifiés (%)`"
+        },
+        "metrics": [
+          {
+            "type": "primary",
+            "column": "Part des portails authentifiés (%)"
+          }
+        ]
+      },
+      "grid": {
+        "x": 36,
+        "y": 252,
+        "w": 12,
+        "h": 11
+      }
+    },
+    {
+      "type": "vis",
+      "config": {
+        "type": "data_table",
+        "title": "Portails web authentifiés",
+        "data_source": {
+          "type": "data_view_reference",
+          "ref_id": "asmira-exposure-current"
+        },
+        "query": {
+          "language": "kql",
+          "expression": "asmira.exposure.web_auth.type : (\"http\" or \"local_form\" or \"sso\")"
+        },
+        "rows": [
+          {
+            "operation": "terms",
+            "fields": [
+              "server.domain"
+            ],
+            "limit": 1000,
+            "label": "FQDN"
+          }
+        ],
+        "metrics": [
+          {
+            "operation": "last_value",
+            "field": "server.registered_domain",
+            "label": "Domaine",
+            "time_field": "@timestamp"
+          },
+          {
+            "operation": "last_value",
+            "field": "asmira.exposure.web_auth.type",
+            "label": "Authentification",
+            "time_field": "@timestamp"
+          },
+          {
+            "operation": "last_value",
+            "field": "asmira.exposure.web_auth.idp",
+            "label": "Fournisseur d’identité",
+            "time_field": "@timestamp"
+          },
+          {
+            "operation": "last_value",
+            "field": "asmira.exposure.web_auth.product",
+            "label": "Portail reconnu",
+            "time_field": "@timestamp"
+          },
+          {
+            "operation": "last_value",
+            "field": "asmira.exposure.web_auth.http_schemes_text",
+            "label": "Schémas HTTP",
+            "time_field": "@timestamp"
+          },
+          {
+            "operation": "last_value",
+            "field": "asmira.exposure.web_auth.mfa_hints_text",
+            "label": "Indices MFA",
+            "time_field": "@timestamp"
+          },
+          {
+            "operation": "last_value",
+            "field": "asmira.exposure.web_auth.title",
+            "label": "Titre de la page",
+            "time_field": "@timestamp"
+          },
+          {
+            "operation": "last_value",
+            "field": "asmira.exposure.web_auth.url",
+            "label": "Page d’authentification",
+            "time_field": "@timestamp"
+          },
+          {
+            "operation": "last_value",
+            "field": "asmira.exposure.web_auth.site_url",
+            "label": "Lien",
+            "time_field": "@timestamp"
+          }
+        ]
+      },
+      "grid": {
+        "x": 0,
+        "y": 263,
+        "w": 48,
+        "h": 15
+      }
+    },
+    {
+      "type": "markdown",
+      "config": {
+        "content": "### Surface d’exposition\nPorts sondés : 22, 25, 80, 443, 465, 587, 993, 995, 3389, 8080 et 8443. Pour chaque port ouvert, Asmira vérifie le chiffrement : TLS direct (443, 465, 993, 995, 8080, 8443), STARTTLS (25, 587), CredSSP/TLS ou chiffrement RDP natif (3389). Le port 22 n’est classé SSH que si le serveur présente une bannière SSH (voir la section SSH). Un port n’est classé en clair que si le service a répondu sans chiffrement. Un port de CDN muet reste indéterminé. Seul le port 80 est du HTTP en clair par nature et ne compte pas comme service non chiffré. Un 8080 en clair n’est compté que s’il ne redirige pas vers HTTPS (**Redirection HTTPS**), car HSTS conserve le port.",
+        "hide_border": true,
+        "settings": {
+          "open_links_in_new_tab": true
+        }
+      },
+      "grid": {
+        "x": 0,
+        "y": 278,
         "w": 48,
         "h": 6
       }
@@ -1538,7 +1805,7 @@
       },
       "grid": {
         "x": 0,
-        "y": 253,
+        "y": 284,
         "w": 24,
         "h": 11
       }
@@ -1586,7 +1853,7 @@
       },
       "grid": {
         "x": 24,
-        "y": 253,
+        "y": 284,
         "w": 24,
         "h": 11
       }
@@ -1622,7 +1889,7 @@
       },
       "grid": {
         "x": 0,
-        "y": 264,
+        "y": 295,
         "w": 48,
         "h": 12
       }
@@ -1630,7 +1897,7 @@
     {
       "grid": {
         "x": 0,
-        "y": 276,
+        "y": 307,
         "w": 24,
         "h": 10
       },
@@ -1677,7 +1944,7 @@
     {
       "grid": {
         "x": 24,
-        "y": 276,
+        "y": 307,
         "w": 24,
         "h": 10
       },
@@ -1724,7 +1991,7 @@
     {
       "grid": {
         "x": 0,
-        "y": 286,
+        "y": 317,
         "w": 48,
         "h": 10
       },
@@ -1781,7 +2048,7 @@
     {
       "grid": {
         "x": 0,
-        "y": 296,
+        "y": 327,
         "w": 48,
         "h": 4
       },
@@ -1797,7 +2064,7 @@
     {
       "grid": {
         "x": 0,
-        "y": 300,
+        "y": 331,
         "w": 12,
         "h": 10
       },
@@ -1823,7 +2090,7 @@
     {
       "grid": {
         "x": 12,
-        "y": 300,
+        "y": 331,
         "w": 12,
         "h": 10
       },
@@ -1856,7 +2123,7 @@
     {
       "grid": {
         "x": 24,
-        "y": 300,
+        "y": 331,
         "w": 12,
         "h": 10
       },
@@ -1908,7 +2175,7 @@
     {
       "grid": {
         "x": 36,
-        "y": 300,
+        "y": 331,
         "w": 12,
         "h": 10
       },
@@ -1960,7 +2227,7 @@
     {
       "grid": {
         "x": 0,
-        "y": 310,
+        "y": 341,
         "w": 48,
         "h": 10
       },
@@ -2016,7 +2283,7 @@
       },
       "grid": {
         "x": 0,
-        "y": 320,
+        "y": 351,
         "w": 48,
         "h": 4
       }

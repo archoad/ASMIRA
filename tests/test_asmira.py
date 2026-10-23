@@ -510,13 +510,15 @@ def testPqcHybridLevel(kex, certificate, chain, level):
 	assert asmira.pqcHybridLevel(kex, certificate, chain) == level
 
 
-@pytest.mark.parametrize('kexStatus, weak, findings', [
-	('hybrid', [], set()),
+@pytest.mark.parametrize('kexStatus, weak, legacy, findings', [
+	('hybrid', [], [], set()),
 	# NTRU Prime : hybride non normalisé, sans constat d’absence de PQC.
-	('hybrid_sntrup', [], set()),
-	('classical', ['ssh-rsa'], {'SSH_NO_PQC_KEX', 'SSH_WEAK_ALGORITHMS'}),
+	('hybrid_sntrup', [], [], set()),
+	('classical', ['ssh-rsa'], [], {'SSH_NO_PQC_KEX', 'SSH_WEAK_ALGORITHMS'}),
+	# Les MAC hérités d’OpenSSH ont leur propre constat, de gravité faible.
+	('hybrid', [], ['hmac-sha1'], {'SSH_LEGACY_MAC'}),
 ])
-def testExposureEventsCarrySshAndFindings(kexStatus, weak, findings):
+def testExposureEventsCarrySshAndFindings(kexStatus, weak, legacy, findings):
 	event = asmira.buildExposureEvents([gradedItem(
 		port22='open',
 		tls_port22='ssh',
@@ -531,6 +533,7 @@ def testExposureEventsCarrySshAndFindings(kexStatus, weak, findings):
 		ssh_host_key_pqc_status='classical',
 		ssh_cipher_256=True,
 		ssh_weak_algorithms=weak,
+		ssh_legacy_macs=legacy,
 	)], '20260731T200000Z-12345678')[0]
 	exposure = event['asmira']['exposure']
 
@@ -538,8 +541,42 @@ def testExposureEventsCarrySshAndFindings(kexStatus, weak, findings):
 	assert exposure['ssh']['software'] == ['OpenSSH_9.6']
 	assert exposure['ssh']['pqc_kex_status'] == [kexStatus]
 	assert exposure['ssh']['cipher_256'] == [True]
+	assert exposure['ssh']['legacy_macs'] == legacy
 	sshFindings = {code for code in exposure['tls'].get('findings', []) if code.startswith('SSH_')}
 	assert sshFindings == findings
+
+
+@pytest.mark.parametrize('values, findings', [
+	({'web_auth': 'http', 'web_auth_http_schemes': ['NTLM']}, {'WEB_AUTH_HTTP'}),
+	({'web_auth': 'local_form', 'web_auth_mfa_hints': ['otp']}, {'WEB_AUTH_LOCAL_FORM'}),
+	({'web_auth': 'sso', 'web_auth_idp': 'Google', 'web_auth_idp_corporate': False}, {'WEB_AUTH_EXTERNAL_IDP'}),
+	({'web_auth': 'sso', 'web_auth_idp': 'ADFS', 'web_auth_idp_corporate': True}, set()),
+	# Sans fournisseur déclaré, aucun n’est jugé externe.
+	({'web_auth': 'sso', 'web_auth_idp': 'Okta', 'web_auth_idp_corporate': None}, set()),
+	({'web_auth': 'none'}, set()),
+	({'web_auth': 'unknown'}, set()),
+])
+def testExposureEventsCarryWebAuthAndFindings(values, findings):
+	event = asmira.buildExposureEvents([gradedItem(
+		web_auth_url='https://www.example.com/login',
+		web_auth_title='Accueil',
+		**values,
+	)], '20260731T200000Z-12345678')[0]
+	exposure = event['asmira']['exposure']
+
+	assert exposure['web_auth']['type'] == values['web_auth']
+	assert exposure['web_auth']['site_url'] == f'https://{event["server"]["domain"]}/'
+	assert exposure['web_auth']['http_schemes'] == values.get('web_auth_http_schemes', [])
+	assert exposure['web_auth']['mfa_hints'] == values.get('web_auth_mfa_hints', [])
+	assert exposure['web_auth']['mfa_hints_text'] == (', '.join(values['web_auth_mfa_hints']) if values.get('web_auth_mfa_hints') else None)
+	webFindings = {code for code in exposure['tls'].get('findings', []) if code.startswith('WEB_AUTH_')}
+	assert webFindings == findings
+
+
+def testExposureEventsWithoutWebAuthHaveNoWebAuthBlock():
+	event = asmira.buildExposureEvents([gradedItem()], '20260731T200000Z-12345678')[0]
+
+	assert 'web_auth' not in event['asmira']['exposure']
 
 
 def testExposureEventsWithoutSshHaveNoSshBlock():
@@ -967,6 +1004,35 @@ def testTlsAnalyseResumesFromCheckpoint(monkeypatch, tmp_path):
 	assert calls == ['two.example.com']
 	assert [item['host'] for item in result] == ['one.example.com', 'two.example.com']
 	assert json.loads(outputFile.read_text()) == result
+
+
+def testTlsAnalyseRunsWebAuthenticationOnlyWhenEnabled(monkeypatch, tmp_path):
+	inputFile = tmp_path / 'targets.json'
+	asmiraCommon.atomicWriteJson(inputFile, [{'host': 'www.example.com', 'ip': '192.0.2.1'}])
+	calls = []
+	monkeypatch.setattr(webTLS, 'analyseEndpoint', lambda item, *args: {**item, 'scan_status': 'success'})
+
+	def fakeWebAuth(items, workers=2, corporateIdp=()):
+		calls.append((len(items), workers, corporateIdp))
+		for item in items:
+			item['web_auth'] = 'sso'
+
+	monkeypatch.setattr(webTLS, 'analyseWebAuthentication', fakeWebAuth)
+
+	for enabled in (False, True):
+		result = webTLS.tlsAnalyse(
+			captureScreenshots=False,
+			listIpFile=inputFile,
+			destinationFile=tmp_path / f'output-{enabled}.json',
+			checkpointFile=tmp_path / f'checkpoint-{enabled}.json',
+			generateXlsx=False,
+			webAuth=enabled,
+			webAuthWorkers=3,
+			corporateIdp=('sts.example.com',),
+		)
+
+	assert calls == [(1, 3, ('sts.example.com',))]
+	assert result[0]['web_auth'] == 'sso'
 
 
 def testCleanExportsOnlyRemovesManagedExpiredFiles(tmp_path):

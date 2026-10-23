@@ -288,6 +288,35 @@ def removeLegacyExposureLatest(client):
 	client.request('DELETE', LEGACY_EXPOSURE_LATEST, allowedStatuses=(404,))
 
 
+# Formats propres à une data view : le tableau des portails authentifiés
+# affiche le type en clair et un lien « Ouvrir le site » vers un nouvel onglet.
+DATA_VIEW_FIELD_FORMATS = {
+	'asmira-exposure-current': {
+		'asmira.exposure.web_auth.site_url': {
+			'id': 'url',
+			'params': {
+				'type': 'a',
+				'urlTemplate': '{{value}}',
+				'labelTemplate': 'Ouvrir le site',
+				'openLinkInCurrentTab': False,
+			},
+		},
+		'asmira.exposure.web_auth.type': {
+			'id': 'static_lookup',
+			'params': {
+				'lookupEntries': [
+					{'key': 'sso', 'value': 'Fournisseur d’identité'},
+					{'key': 'local_form', 'value': 'Formulaire local'},
+					{'key': 'http', 'value': 'HTTP natif'},
+					{'key': 'none', 'value': 'Sans authentification'},
+					{'key': 'unknown', 'value': 'Indéterminé'},
+				],
+			},
+		},
+	},
+}
+
+
 def configureKibana(client):
 	dataViews = (
 		('asmira-exposure-current', 'Asmira — FQDN actuels'),
@@ -307,6 +336,7 @@ def configureKibana(client):
 				'title': dataViewId,
 				'timeFieldName': '@timestamp',
 				'allowNoIndex': True,
+				'fieldFormats': DATA_VIEW_FIELD_FORMATS.get(dataViewId, {}),
 			},
 		})
 	client.request(

@@ -19,6 +19,10 @@ def testExampleConfigurationIsValidAndSafe():
 	assert config.captureScreenshots is False
 	assert config.generateGraphs is False
 	assert config.generateXlsx is False
+	assert config.webAuth is False
+	assert config.webAuthWorkers == 2
+	assert config.corporateIdp == ()
+	assert config.chromiumPath is None and config.chromedriverPath is None
 
 
 def testSystemdTimerRunsMondayEveningInParis():
@@ -52,7 +56,7 @@ def testElasticJsonAssetsAreValidAndDashboardIsGlobal():
 	assert fqdnTransform['dest']['index'] == 'asmira-fqdn-latest'
 	assert 'retention_policy' not in fqdnTransform
 	assert dashboard['title'] == '[archoad] Asmira — Surface d’exposition globale'
-	assert len(dashboard['panels']) == 53
+	assert len(dashboard['panels']) == 58
 	controls = dashboard['pinned_panels']
 	assert [control['config']['title'] for control in controls] == ['Domaine', 'FQDN']
 	assert [control['config']['field_name'] for control in controls] == [
@@ -121,7 +125,7 @@ def testElasticJsonAssetsAreValidAndDashboardIsGlobal():
 		for panel in dashboard['panels']
 		if panel['type'] == 'markdown'
 	]
-	assert len(markdownPanels) == 8
+	assert len(markdownPanels) == 9
 	markdownContent = '\n'.join(
 		panel['config']['content']
 		for panel in markdownPanels
@@ -135,6 +139,7 @@ def testElasticJsonAssetsAreValidAndDashboardIsGlobal():
 		'Découverte DNS',
 		'Graphe des domaines',
 		'### SSH',
+		'### Authentification web',
 	):
 		assert heading in markdownContent
 	xyPanels = [
@@ -212,7 +217,7 @@ def testElasticJsonAssetsAreValidAndDashboardIsGlobal():
 	sshMappings = mappings['asmira']['properties']['exposure']['properties']['ssh']['properties']
 	assert sshMappings['ip']['type'] == 'ip'
 	assert sshMappings['cipher_256']['type'] == 'boolean'
-	for fieldName in ('software', 'pqc_kex_status', 'host_key_pqc_status', 'weak_algorithms'):
+	for fieldName in ('software', 'pqc_kex_status', 'host_key_pqc_status', 'weak_algorithms', 'legacy_macs'):
 		assert sshMappings[fieldName]['type'] == 'keyword'
 	sshTable = next(
 		panel
@@ -222,6 +227,40 @@ def testElasticJsonAssetsAreValidAndDashboardIsGlobal():
 	# Une ligne par adresse : la clé d’hôte appartient à la machine, pas au FQDN.
 	assert 'BY Adresse = asmira.exposure.ssh.ip' in sshTable['config']['data_source']['query']
 	assert sshTable['config']['metrics'] == [{'column': 'FQDN'}]
+	assert {'column': 'MAC hérités'} in sshTable['config']['rows']
+	webAuthMappings = mappings['asmira']['properties']['exposure']['properties']['web_auth']['properties']
+	assert webAuthMappings['idp_corporate']['type'] == 'boolean'
+	for fieldName in ('type', 'idp', 'product', 'mfa_hints', 'site_url'):
+		assert webAuthMappings[fieldName]['type'] == 'keyword'
+	webAuthPie = next(
+		panel
+		for panel in dashboard['panels']
+		if panel['config'].get('title') == 'Authentification des pages d’accueil'
+	)
+	webAuthColors = {
+		entry['values'][0]: entry['color']['value']
+		for entry in webAuthPie['config']['group_by'][0]['color']['mapping']
+	}
+	assert webAuthColors['HTTP natif (Basic, NTLM…) : MFA impossible'] == '#E7664C'
+	assert webAuthColors['Fournisseur d’identité de l’organisation'] == '#54B399'
+	portalTable = next(
+		panel
+		for panel in dashboard['panels']
+		if panel['config'].get('title') == 'Portails web authentifiés'
+	)
+	# Le lien « Ouvrir le site » est un format d’URL de la data view enregistrée :
+	# une data view ad hoc (data_view_spec) ne le porterait pas.
+	assert portalTable['config']['data_source'] == {
+		'type': 'data_view_reference',
+		'ref_id': 'asmira-exposure-current',
+	}
+	assert 'asmira.exposure.web_auth.site_url' in [
+		metric['field'] for metric in portalTable['config']['metrics']
+	]
+	linkFormat = elasticSetup.DATA_VIEW_FIELD_FORMATS['asmira-exposure-current']['asmira.exposure.web_auth.site_url']
+	assert linkFormat['id'] == 'url'
+	assert linkFormat['params']['labelTemplate'] == 'Ouvrir le site'
+	assert linkFormat['params']['openLinkInCurrentTab'] is False
 	portMappings = mappings['asmira']['properties']['exposure']['properties']['port']['properties']
 	for port in ('25', '465', '587', '993', '995', '8080', '8443'):
 		assert portMappings[port]['properties']['certificate_pqc']['type'] == 'keyword'
@@ -510,6 +549,13 @@ def testKibanaSetupCreatesCertificateDataViewAndPrefixedDashboard():
 		if method == 'POST' and path == 'api/data_views/data_view'
 	}
 	assert 'asmira-exposure-certificates-current' in dataViewIds
+	exposureView = next(
+		payload['data_view']
+		for method, path, payload in client.calls
+		if method == 'POST' and path == 'api/data_views/data_view'
+		and payload['data_view']['id'] == 'asmira-exposure-current'
+	)
+	assert 'asmira.exposure.web_auth.site_url' in exposureView['fieldFormats']
 	dashboardPayload = next(
 		payload
 		for method, path, payload in client.calls

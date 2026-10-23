@@ -295,13 +295,14 @@ def testEmailFailureDoesNotFailTheRun(tmp_path, monkeypatch, capsys):
 
 
 def testSshServersAreCountedPerAddressWithWeakestStatus():
-	def sshEvent(name, addresses, statuses, weak=()):
+	def sshEvent(name, addresses, statuses, weak=(), legacy=()):
 		return({
 			'server': {'domain': name, 'registered_domain': 'example.com'},
 			'asmira': {'exposure': {'present': True, 'ssh': {
 				'ip': list(addresses),
 				'pqc_kex_status': list(statuses),
 				'weak_algorithms': list(weak),
+				'legacy_macs': list(legacy),
 			}, 'tls': {}}},
 		})
 
@@ -311,8 +312,51 @@ def testSshServersAreCountedPerAddressWithWeakestStatus():
 		sshEvent('b.example.com', ['192.0.2.1'], ['hybrid']),
 		sshEvent('c.example.com', ['192.0.2.2'], ['hybrid_sntrup'], ['ssh-rsa']),
 		sshEvent('d.example.com', ['192.0.2.3'], ['classical']),
-		sshEvent('e.example.com', ['192.0.2.3'], ['hybrid']),
+		sshEvent('e.example.com', ['192.0.2.3'], ['hybrid'], legacy=['hmac-sha1']),
 	])
 
 	assert result['kex'] == {'hybrid': 1, 'hybrid_sntrup': 1, 'classical': 1}
 	assert result['weak'] == 1
+	assert result['legacy_macs'] == 1
+
+
+def testAnalyseWebAuthOrdersPortalsFromWeakest():
+	def webEvent(name, webAuth):
+		return({
+			'server': {'domain': name, 'registered_domain': 'example.com'},
+			'asmira': {'exposure': {'present': True, 'web_auth': webAuth, 'tls': {}}},
+		})
+
+	events = [
+		webEvent('sso.example.com', {'type': 'sso', 'idp': 'ADFS', 'idp_corporate': True, 'mfa_hints': []}),
+		webEvent('ext.example.com', {'type': 'sso', 'idp': 'Google', 'idp_corporate': False, 'mfa_hints': []}),
+		webEvent('form.example.com', {'type': 'local_form', 'mfa_hints': ['passkey']}),
+		webEvent('owa.example.com', {'type': 'http', 'http_schemes': ['NTLM']}),
+		webEvent('www.example.com', {'type': 'none'}),
+		exposureEvent('nothing.example.com'),
+	]
+
+	result = asmiraReport.analyseWebAuth(events)
+
+	assert result['types'] == {'sso': 2, 'local_form': 1, 'http': 1, 'none': 1}
+	assert [event['server']['domain'] for event in result['portals']] == [
+		'owa.example.com', 'form.example.com', 'ext.example.com', 'sso.example.com',
+	]
+	assert (result['sso_corporate'], result['sso_external'], result['passkey']) == (1, 1, 1)
+
+	events = exposureEvents()
+	events[0]['asmira']['exposure']['web_auth'] = {'type': 'local_form', 'mfa_hints': []}
+	events[1]['asmira']['exposure']['web_auth'] = {'type': 'sso', 'idp': 'ADFS', 'mfa_hints': []}
+	summary = asmiraReport.renderSummary(analysis(events=events))
+	report = asmiraReport.renderHtml(analysis(events=events), maxItems=10)
+
+	assert 'Authentification web : 2 portail(s) authentifié(s), dont 1 délégué(s)' in summary
+	assert '<section id="authentification">' in report
+	assert 'Formulaire local' in report
+
+
+def testReportWithoutWebAuthHasNoSection():
+	report = asmiraReport.renderHtml(analysis(), maxItems=10)
+
+	assert '<section id="authentification">' not in report
+	assert 'Authentification web' not in asmiraReport.renderSummary(analysis())

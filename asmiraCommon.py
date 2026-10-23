@@ -225,6 +225,11 @@ class AsmiraConfig:
 	reportSmtpUsername: str | None = None
 	reportSmtpTimeout: int = 30
 	reportMaxItems: int = 50
+	webAuth: bool = False
+	webAuthWorkers: int = 2
+	corporateIdp: tuple = ()
+	chromiumPath: Path | None = None
+	chromedriverPath: Path | None = None
 
 
 EMAIL_ADDRESS_PATTERN = re.compile(r'^[^@\s<>,;"]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$')
@@ -330,4 +335,9 @@ def loadConfig(filePath=DEFAULT_CONFIG_PATH):
 		reportSmtpUsername=parser.get('report', 'smtp_username', fallback='').strip() or None,
 		reportSmtpTimeout=getPositiveInt(parser, 'report', 'smtp_timeout', 30),
 		reportMaxItems=getPositiveInt(parser, 'report', 'max_items', 50),
+		webAuth=parser.getboolean('active_scan', 'web_auth', fallback=False),
+		webAuthWorkers=getPositiveInt(parser, 'active_scan', 'web_auth_workers', 2),
+		corporateIdp=tuple(splitConfigList(parser.get('active_scan', 'corporate_idp', fallback=''))),
+		chromiumPath=optionalPath(parser, 'tools', 'chromium'),
+		chromedriverPath=optionalPath(parser, 'tools', 'chromedriver'),
 	))

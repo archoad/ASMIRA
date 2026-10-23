@@ -9,6 +9,7 @@ import requests
 import urllib3
 import shutil
 import socket
+import ssl
 import subprocess
 import threading
 import time
@@ -26,7 +27,7 @@ import tldextract
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import parse_qs, urlsplit
 from cryptography import x509
 from cryptography.exceptions import UnsupportedAlgorithm
 from cryptography.utils import CryptographyDeprecationWarning
@@ -54,9 +55,11 @@ except ImportError:
 try:
 	from selenium import webdriver
 	from selenium import common
+	from selenium.webdriver.chrome.service import Service as ChromeService
 except ImportError:
 	webdriver = None
 	common = None
+	ChromeService = None
 
 
 debug = False
@@ -302,7 +305,14 @@ def classifyHandshakeSignature(name):
 	return('pqc')
 
 
-def configureTools(netcat=None, nmap=None, openssl=None):
+def configureTools(netcat=None, nmap=None, openssl=None, chromium=None, chromedriver=None):
+	# Chromium et chromedriver ne servent qu’à l’analyse de l’authentification
+	# web, facultative : ils ne figurent pas parmi les outils requis.
+	global CHROMIUM_PATH, CHROMEDRIVER_PATH
+	if chromium is not None:
+		CHROMIUM_PATH = str(chromium)
+	if chromedriver is not None:
+		CHROMEDRIVER_PATH = str(chromedriver)
 	overrides = {
 		'netcat': netcat,
 		'nmap': nmap,
@@ -1076,6 +1086,422 @@ def getScreenShot(host, hostip=None):
 	return(result)
 
 
+
+# Authentification des portails web : une seule visite par FQDN, sans rien
+# saisir ni soumettre. Le second facteur n’est demandé qu’après un mot de passe
+# valide : il n’est pas observable de l’extérieur. La sonde établit donc où se
+# décide l’authentification (HTTP natif, fournisseur d’identité, formulaire
+# local) et relève les indices de MFA visibles sur la page.
+WEB_AUTH_PAGE_TIMEOUT = 20
+WEB_AUTH_RENDER_DELAY = 2
+WEB_AUTH_SPA_DELAY = 3
+WEB_AUTH_SPA_TEXT_LENGTH = 200
+# Chemins des outils, reconfigurés par l’orchestrateur ; à défaut, le PATH.
+# Selenium Manager n’est jamais sollicité : il téléchargerait un pilote.
+CHROMIUM_PATH = None
+CHROMEDRIVER_PATH = None
+# Schémas d’authentification HTTP interactifs : aucun second facteur possible.
+# Bearer, réservé aux API, n’en fait pas partie.
+HTTP_INTERACTIVE_AUTH_SCHEMES = ('basic', 'digest', 'ntlm', 'negotiate')
+HTTP_AUTH_SCHEME = re.compile(r'(?:^|,)\s*([A-Za-z][A-Za-z0-9!#$%&\'*+.^_`|~-]*)(?=\s|,|$)')
+# (nom, motif du nom d’hôte, motif du chemin) : un fournisseur reconnu à son
+# domaine ou, pour les logiciels installés chez l’organisation, à son chemin.
+WEB_AUTH_IDPS = (
+	('Microsoft Entra ID', re.compile(r'^(login\.microsoftonline\.com|login\.microsoft\.com|login\.windows\.net|[a-z0-9-]+\.b2clogin\.com)$'), None),
+	('Compte Microsoft', re.compile(r'^login\.live\.com$'), None),
+	('ADFS', None, re.compile(r'^/adfs/(ls|oauth2)(/|$)', re.I)),
+	('Google', re.compile(r'^accounts\.google\.com$'), None),
+	('Okta', re.compile(r'(^|\.)(okta|oktapreview|okta-emea)\.com$'), None),
+	('Auth0', re.compile(r'(^|\.)auth0\.com$'), None),
+	('OneLogin', re.compile(r'(^|\.)onelogin\.com$'), None),
+	('Ping Identity', re.compile(r'(^|\.)(pingone|pingidentity)\.(com|eu)$'), None),
+	('Ping Identity', None, re.compile(r'^/(idp/SSO\.saml2|as/authorization\.oauth2)', re.I)),
+	('Amazon Cognito', re.compile(r'(^|\.)amazoncognito\.com$'), None),
+	('Duo', re.compile(r'(^|\.)duosecurity\.com$'), None),
+	('JumpCloud', re.compile(r'(^|\.)jumpcloud\.com$'), None),
+	('Cloudflare Access', re.compile(r'(^|\.)cloudflareaccess\.com$'), None),
+	('ProConnect', re.compile(r'(^|\.)(proconnect|agentconnect)\.gouv\.fr$'), None),
+	('FranceConnect', re.compile(r'(^|\.)franceconnect\.gouv\.fr$'), None),
+	('Keycloak', None, re.compile(r'^(/auth)?/realms/[^/]+/protocol/(openid-connect|saml)(/|$)', re.I)),
+	('CAS', None, re.compile(r'^(/[^/]+)?/cas/login(/|$)', re.I)),
+	('Shibboleth', None, re.compile(r'^/idp/profile/(SAML2|oidc)/', re.I)),
+)
+# Portails reconnus à leur chemin ou à leur titre : authentification locale.
+WEB_AUTH_PRODUCTS = (
+	('Microsoft Outlook Web App', re.compile(r'^/owa(/|$)', re.I), None),
+	('Microsoft Remote Desktop Web', re.compile(r'^/RDWeb(/|$)', re.I), None),
+	('Fortinet SSL VPN', re.compile(r'^/remote/login', re.I), None),
+	('Cisco ASA / AnyConnect', re.compile(r'^/\+CSCOE\+/', re.I), None),
+	('Citrix Gateway', re.compile(r'^/(vpn/index\.html|logon/LogonPoint/)', re.I), None),
+	('Palo Alto GlobalProtect', re.compile(r'^/global-protect/', re.I), None),
+	('Ivanti Connect Secure', re.compile(r'^/dana-na/', re.I), None),
+	('F5 BIG-IP APM', re.compile(r'^/my\.policy', re.I), None),
+	('SonicWall SSL VPN', re.compile(r'^/sslvpnLogin', re.I), None),
+	('WordPress', re.compile(r'^/wp-(login\.php|admin)(/|$)', re.I), None),
+	('GitLab', re.compile(r'^/users/sign_in', re.I), None),
+	('Roundcube', None, re.compile(r'roundcube', re.I)),
+	('Zimbra', None, re.compile(r'zimbra', re.I)),
+	('Grafana', None, re.compile(r'^grafana$', re.I)),
+	('Jenkins', None, re.compile(r'jenkins', re.I)),
+)
+# Délégation reconnaissable sans fournisseur identifié : requête SAML ou OIDC.
+WEB_AUTH_FEDERATION_QUERY = ('SAMLRequest', 'SAMLart')
+WEB_AUTH_OBSERVE_SCRIPT = r"""
+const loginText = /^(log ?in|sign ?in|se connecter|connexion|s['’]identifier|identifiez-vous|mon compte|my account|espace (client|personnel|adhérent|membre|pro))$/i;
+const loginPath = /\/(login|log-in|signin|sign-in|sign_in|connexion|logon|authentification|auth|sso)(\/|$|\.)/i;
+const all = selector => Array.from(document.querySelectorAll(selector));
+const passwords = all('input[type="password"]');
+const autocompletes = all('input[autocomplete]').map(field => (field.getAttribute('autocomplete') || '').toLowerCase());
+const text = (document.body ? document.body.innerText || '' : '').slice(0, 20000);
+const links = [];
+for (const anchor of all('a[href]')) {
+	let target;
+	try { target = new URL(anchor.href, location.href); } catch (error) { continue; }
+	if (!/^https?:$/.test(target.protocol)) continue;
+	const label = (anchor.innerText || anchor.getAttribute('aria-label') || '').trim();
+	if (loginText.test(label) || loginPath.test(target.pathname)) links.push(target.href);
+	if (links.length >= 5) break;
+}
+const generator = document.querySelector('meta[name="generator"]');
+return {
+	url: location.href,
+	title: (document.title || '').slice(0, 200),
+	password_fields: passwords.length,
+	otp_field: autocompletes.some(value => value.includes('one-time-code')),
+	webauthn_field: autocompletes.some(value => value.includes('webauthn')),
+	passkey_text: /passkey|cl[ée] d['’]acc[èe]s|security key|cl[ée] de s[ée]curit[ée]|windows hello/i.test(text),
+	login_links: links,
+	form_actions: all('form[action]').map(form => form.action).filter(value => /^https?:/.test(value)).slice(0, 10),
+	frames: all('iframe[src]').map(frame => frame.src).filter(value => /^https?:/.test(value)).slice(0, 10),
+	generator: generator ? (generator.content || '').slice(0, 100) : '',
+	text_length: text.length,
+};
+"""
+
+
+def parseHttpAuthResponse(response):
+	"""Statut HTTP et schémas annoncés par WWW-Authenticate (Basic, NTLM,
+	Negotiate…), ou None si la réponse n’est pas du HTTP."""
+	head = response.split(b'\r\n\r\n', 1)[0].decode('iso-8859-1')
+	lines = head.split('\r\n')
+	status = re.match(r'^HTTP/\d(?:\.\d)? (\d{3})', lines[0])
+	if not status:
+		return(None)
+	schemes = []
+	for line in lines[1:]:
+		name, separator, value = line.partition(':')
+		if separator and name.strip().lower() == 'www-authenticate':
+			# Les paramètres (realm="…", charset=…) sont écartés par le motif.
+			for scheme in HTTP_AUTH_SCHEME.findall(value):
+				if scheme.lower() not in (item.lower() for item in schemes):
+					schemes.append(scheme)
+	return({'status': int(status.group(1)), 'schemes': schemes})
+
+
+def probeHttpAuth(hostip, host, port=443, timeout=None):
+	"""Requête GET / en HTTPS vers l’adresse, avec le FQDN en SNI. Le certificat
+	n’est pas vérifié : seule la réponse importe. Échange borné."""
+	timeout = PORT_PROBE_TIMEOUT if timeout is None else timeout
+	deadline = time.monotonic() + timeout
+	context = ssl.create_default_context()
+	context.check_hostname = False
+	context.verify_mode = ssl.CERT_NONE
+	request = (
+		f'GET / HTTP/1.1\r\nHost: {host}\r\nUser-Agent: asmira\r\n'
+		'Accept: text/html,*/*\r\nConnection: close\r\n\r\n'
+	).encode('ascii', errors='ignore')
+	response = b''
+	try:
+		with socket.create_connection((hostip, port), timeout=timeout) as rawConnection:
+			with context.wrap_socket(rawConnection, server_hostname=host) as connection:
+				connection.sendall(request)
+				while b'\r\n\r\n' not in response and len(response) < HTTP_MAX_HEADER:
+					remaining = deadline - time.monotonic()
+					if remaining <= 0:
+						break
+					connection.settimeout(remaining)
+					chunk = connection.recv(4096)
+					if not chunk:
+						break
+					response += chunk
+	except (OSError, ValueError):
+		if not response:
+			return(None)
+	return(parseHttpAuthResponse(response[:HTTP_MAX_HEADER]) if response else None)
+
+
+def interactiveHttpSchemes(httpAuth):
+	if not httpAuth or httpAuth.get('status') != 401:
+		return([])
+	return([
+		scheme
+		for scheme in httpAuth.get('schemes') or []
+		if scheme.lower() in HTTP_INTERACTIVE_AUTH_SCHEMES
+	])
+
+
+def cleanUrl(url):
+	"""URL sans requête ni fragment : jetons OAuth, state et nonce n’y restent pas."""
+	parts = urlsplit(url or '')
+	if parts.scheme not in ('http', 'https') or not parts.hostname:
+		return(None)
+	port = f':{parts.port}' if parts.port and parts.port not in (80, 443) else ''
+	return(f'{parts.scheme}://{parts.hostname}{port}{parts.path or "/"}')
+
+
+def identifyIdp(url):
+	"""(fournisseur, nom d’hôte) si l’URL appartient à un fournisseur d’identité
+	connu ou porte une requête de fédération, sinon (None, None)."""
+	parts = urlsplit(url or '')
+	host = (parts.hostname or '').lower()
+	if not host:
+		return(None, None)
+	for name, hostPattern, pathPattern in WEB_AUTH_IDPS:
+		if hostPattern is not None and not hostPattern.search(host):
+			continue
+		if pathPattern is not None and not pathPattern.search(parts.path or '/'):
+			continue
+		return(name, host)
+	query = parse_qs(parts.query)
+	if any(key in query for key in WEB_AUTH_FEDERATION_QUERY):
+		return('SAML (non identifié)', host)
+	if 'client_id' in query and 'response_type' in query and 'redirect_uri' in query:
+		return('OpenID Connect (non identifié)', host)
+	return(None, None)
+
+
+def identifyProduct(url, title='', generator=''):
+	path = urlsplit(url or '').path or '/'
+	for name, pathPattern, titlePattern in WEB_AUTH_PRODUCTS:
+		if pathPattern is not None and pathPattern.search(path):
+			return(name)
+		if titlePattern is not None and titlePattern.search((title or '').strip()):
+			return(name)
+	if re.match(r'^WordPress', generator or ''):
+		return('WordPress')
+	return(None)
+
+
+def idpIsCorporate(url, corporateIdp):
+	"""True si l’URL du fournisseur commence par l’un des préfixes déclarés
+	(« hôte » ou « hôte/chemin »), False sinon, None si aucun n’est déclaré."""
+	if not corporateIdp:
+		return(None)
+	parts = urlsplit(url or '')
+	location = f'{(parts.hostname or "").lower()}{parts.path or "/"}'
+	for prefix in corporateIdp:
+		prefix = prefix.strip().lower().rstrip('/')
+		if prefix and (location == prefix or location.startswith(prefix + '/')):
+			return(True)
+	return(False)
+
+
+def classifyWebAuth(httpAuth, pages, corporateIdp=()):
+	"""Champs web_auth_* à partir de la réponse HTTP et des pages observées
+	(accueil, puis lien de connexion suivi). web_auth vaut http, sso,
+	local_form, none ou unknown (page non chargée)."""
+	result = {
+		'web_auth': 'unknown',
+		'web_auth_http_schemes': [],
+		'web_auth_idp': None,
+		'web_auth_idp_host': None,
+		'web_auth_idp_corporate': None,
+		'web_auth_product': None,
+		'web_auth_mfa_hints': [],
+		'web_auth_url': None,
+		'web_auth_login_link': False,
+	}
+	schemes = interactiveHttpSchemes(httpAuth)
+	if schemes:
+		result.update({'web_auth': 'http', 'web_auth_http_schemes': schemes})
+		return(result)
+	if not pages:
+		return(result)
+	result['web_auth'] = 'none'
+	for index, page in enumerate(pages):
+		product = identifyProduct(page.get('url'), page.get('title'), page.get('generator'))
+		result['web_auth_product'] = result['web_auth_product'] or product
+		idpUrl = next(
+			(
+				url
+				for url in [page.get('url'), *(page.get('form_actions') or []), *(page.get('frames') or [])]
+				if identifyIdp(url)[0]
+			),
+			None,
+		)
+		if idpUrl is not None:
+			name, host = identifyIdp(idpUrl)
+			result.update({
+				'web_auth': 'sso',
+				'web_auth_idp': name,
+				'web_auth_idp_host': host,
+				'web_auth_idp_corporate': idpIsCorporate(idpUrl, corporateIdp),
+				'web_auth_url': cleanUrl(idpUrl),
+			})
+		elif page.get('password_fields') or product:
+			result.update({'web_auth': 'local_form', 'web_auth_url': cleanUrl(page.get('url'))})
+		else:
+			continue
+		hints = []
+		if page.get('webauthn_field') or page.get('passkey_text'):
+			hints.append('passkey')
+		if page.get('otp_field'):
+			hints.append('otp')
+		result['web_auth_mfa_hints'] = hints
+		result['web_auth_login_link'] = index > 0
+		break
+	return(result)
+
+
+def chooseLoginLink(page, registeredDomain):
+	"""Premier lien de connexion du site lui-même ou d’un fournisseur connu :
+	aucun lien externe quelconque n’est suivi."""
+	registeredDomain = (registeredDomain or '').lower()
+	for url in page.get('login_links') or []:
+		host = (urlsplit(url).hostname or '').lower()
+		sameSite = registeredDomain and (host == registeredDomain or host.endswith('.' + registeredDomain))
+		if sameSite or identifyIdp(url)[0]:
+			return(url)
+	return(None)
+
+
+def webAuthAvailability():
+	"""None si Selenium, Chromium et chromedriver sont présents, sinon la raison."""
+	if webdriver is None or ChromeService is None:
+		return('module selenium absent')
+	driverPath = CHROMEDRIVER_PATH or shutil.which('chromedriver')
+	if not driverPath or not os.access(driverPath, os.X_OK):
+		return('chromedriver absent ou non exécutable')
+	browserPath = CHROMIUM_PATH or shutil.which('chromium') or shutil.which('chromium-browser') or shutil.which('google-chrome')
+	if not browserPath or not os.access(browserPath, os.X_OK):
+		return('Chromium absent ou non exécutable')
+	return(None)
+
+
+def createWebDriver(host, hostip=None):
+	options = webdriver.ChromeOptions()
+	options.add_argument('--headless=new')
+	options.add_argument('--disable-gpu')
+	options.add_argument('--disable-dev-shm-usage')
+	options.add_argument('--window-size=1280,720')
+	if hostip:
+		options.add_argument(f'--host-resolver-rules=MAP {host} {hostip}')
+	options.binary_location = (
+		CHROMIUM_PATH or shutil.which('chromium') or shutil.which('chromium-browser') or shutil.which('google-chrome')
+	)
+	service = ChromeService(executable_path=CHROMEDRIVER_PATH or shutil.which('chromedriver'))
+	driver = webdriver.Chrome(options=options, service=service)
+	driver.set_page_load_timeout(WEB_AUTH_PAGE_TIMEOUT)
+	return(driver)
+
+
+def webDriverErrors(timeoutOnly=False):
+	"""Exceptions Selenium à intercepter ; aucune si le module est absent."""
+	if common is None:
+		return(() if timeoutOnly else (OSError,))
+	if timeoutOnly:
+		return(common.exceptions.TimeoutException)
+	return((common.exceptions.WebDriverException, OSError))
+
+
+def observePage(driver, url):
+	"""Charge l’URL et relève les éléments d’authentification une fois la page
+	rendue ; une application monopage presque vide reçoit un délai de plus."""
+	# Page encore en chargement à l’échéance : ce qui est rendu est observé.
+	with contextlib.suppress(webDriverErrors(timeoutOnly=True)):
+		driver.get(url)
+	time.sleep(WEB_AUTH_RENDER_DELAY)
+	page = driver.execute_script(WEB_AUTH_OBSERVE_SCRIPT)
+	if (
+		isinstance(page, dict)
+		and not page.get('password_fields')
+		and not identifyIdp(page.get('url'))[0]
+		and (page.get('text_length') or 0) < WEB_AUTH_SPA_TEXT_LENGTH
+	):
+		time.sleep(WEB_AUTH_SPA_DELAY)
+		page = driver.execute_script(WEB_AUTH_OBSERVE_SCRIPT)
+	return(page if isinstance(page, dict) else None)
+
+
+def renderWebAuth(host, hostip=None, registeredDomain=None):
+	"""Pages observées : l’accueil puis, s’il ne montre aucune authentification,
+	un seul lien de connexion. Liste vide si la page n’a pas pu être chargée."""
+	pages = []
+	driver = None
+	try:
+		driver = createWebDriver(host, hostip)
+		page = observePage(driver, f'https://{host}/')
+		if page is None:
+			return(pages)
+		pages.append(page)
+		if classifyWebAuth(None, pages)['web_auth'] == 'none':
+			link = chooseLoginLink(page, registeredDomain or host)
+			if link is not None:
+				followed = observePage(driver, link)
+				if followed is not None:
+					pages.append(followed)
+	except webDriverErrors():
+		pass
+	finally:
+		if driver is not None:
+			with contextlib.suppress(*webDriverErrors()):
+				driver.quit()
+	return(pages)
+
+
+def webAuthObservation(host, hostip, registeredDomain=None, corporateIdp=()):
+	httpAuth = probeHttpAuth(hostip, host)
+	pages = [] if interactiveHttpSchemes(httpAuth) else renderWebAuth(host, hostip, registeredDomain)
+	result = classifyWebAuth(httpAuth, pages, corporateIdp)
+	result['web_auth_ip'] = hostip
+	if pages and pages[0].get('title'):
+		result['web_auth_title'] = pages[0]['title']
+	return(result)
+
+
+def analyseWebAuthentication(items, workers=2, corporateIdp=()):
+	"""Ajoute les champs web_auth_* à tous les couples d’un FQDN servi en HTTPS,
+	observé une seule fois depuis sa première adresse. Les FQDN déjà observés
+	(reprise de checkpoint) ne sont pas revisités. Rend le nombre de FQDN visités."""
+	byHost = {}
+	for item in items:
+		if item.get('host') and item.get('port443') == 'open' and item.get('certificate_sha256'):
+			byHost.setdefault(item['host'], []).append(item)
+	pending = {
+		host: sorted(hostItems, key=lambda item: ipSortKey(item['ip']))
+		for host, hostItems in byHost.items()
+		if not any(item.get('web_auth') for item in hostItems)
+	}
+	if not pending:
+		return(0)
+	reason = webAuthAvailability()
+	if reason is not None:
+		print(f'### Authentification web non analysée : {reason}')
+		return(0)
+	print(f'### Authentification web : {len(pending)} FQDN')
+	hostsByItem = {id(item): host for host, hostItems in byHost.items() for item in hostItems}
+	with ThreadPoolExecutor(max_workers=min(workers, len(pending))) as executor:
+		futureMap = {
+			executor.submit(
+				webAuthObservation,
+				host,
+				hostItems[0]['ip'],
+				hostItems[0].get('domain_name'),
+				corporateIdp,
+			): host
+			for host, hostItems in pending.items()
+		}
+		results = {}
+		for future in as_completed(futureMap):
+			host = futureMap[future]
+			results[host] = future.result()
+			print(f'(web) {host} --> {results[host]["web_auth"]}')
+	for item in items:
+		host = hostsByItem.get(id(item))
+		if host in results:
+			item.update(results[host])
+	return(len(results))
+
 def testShodan(ip):
 	debugDisplay()
 	key = os.environ.get('SHODAN_API_KEY')
@@ -1641,8 +2067,12 @@ SSH_KEX_MARKERS = re.compile(r'^(ext-info-[cs]|kex-strict-[cs]-v00@openssh\.com)
 SSH_WEAK_ALGORITHMS = re.compile(
 	r'^(diffie-hellman-group1-sha1|diffie-hellman-group14-sha1|diffie-hellman-group-exchange-sha1'
 	r'|ssh-dss.*|ssh-rsa|ssh-rsa-cert-v01@openssh\.com|arcfour.*|3des.*|blowfish.*|cast128.*'
-	r'|.*-cbc(@.*)?|hmac-md5.*|hmac-sha1.*|umac-64.*|hmac-ripemd160.*|none)$'
+	r'|.*-cbc(@.*)?|hmac-md5.*|hmac-ripemd160.*|none)$'
 )
+# MAC encore proposés par la configuration par défaut d’OpenSSH, sans attaque
+# pratique connue : signalés à part, avec une gravité faible, pour ne pas noyer
+# les algorithmes réellement obsolètes.
+SSH_LEGACY_MACS = re.compile(r'^(hmac-sha1(-96)?|umac-64)(-etm)?(@openssh\.com)?$')
 sshResults = {}
 sshLocks = {}
 sshLocksGuard = threading.Lock()
@@ -1737,7 +2167,8 @@ def probeSsh(hostip, port=22, timeout=None):
 
 def classifySsh(probe):
 	"""Champs ssh_* d’une sonde : statut post-quantique de l’échange de clés et
-	de la clé d’hôte, chiffrement de 256 bits, algorithmes obsolètes."""
+	de la clé d’hôte, chiffrement de 256 bits, algorithmes obsolètes et MAC
+	hérités."""
 	banner = probe['banner']
 	result = {
 		'ssh_banner': banner,
@@ -1771,6 +2202,7 @@ def classifySsh(probe):
 		),
 		'ssh_cipher_256': any('aes256' in name or 'chacha20' in name for name in probe['ciphers']),
 		'ssh_weak_algorithms': sorted({name for name in algorithms if SSH_WEAK_ALGORITHMS.match(name)}),
+		'ssh_legacy_macs': sorted({name for name in probe['macs'] if SSH_LEGACY_MACS.match(name)}),
 	})
 	return(result)
 
@@ -2104,6 +2536,9 @@ def tlsAnalyse(
 	checkpointEvery=25,
 	generateXlsx=True,
 	cipherWorkers=8,
+	webAuth=False,
+	webAuthWorkers=2,
+	corporateIdp=(),
 ):
 	debugDisplay()
 	startTime = time.monotonic()
@@ -2178,6 +2613,12 @@ def tlsAnalyse(
 		commandSemaphore=commandSemaphore,
 		cipherWorkers=cipherWorkers,
 	)
+	if webAuth:
+		analyseWebAuthentication(
+			list(completedByKey.values()),
+			workers=webAuthWorkers,
+			corporateIdp=corporateIdp,
+		)
 	output = [
 		completedByKey[targetKey(item)]
 		for item in output
@@ -2343,6 +2784,9 @@ def tlsCartography(
 	subprocessBudget=16,
 	checkpointEvery=25,
 	maxEndpoints=None,
+	webAuth=False,
+	webAuthWorkers=2,
+	corporateIdp=(),
 ):
 	global cipherList
 	debugDisplay()
@@ -2380,6 +2824,9 @@ def tlsCartography(
 		checkpointEvery=checkpointEvery,
 		generateXlsx=generateXlsx,
 		cipherWorkers=max(1, min(8, subprocessBudget)),
+		webAuth=webAuth,
+		webAuthWorkers=webAuthWorkers,
+		corporateIdp=corporateIdp,
 	)
 	if generateGraphs:
 		computeGraphs(jsonFile=analysisFile)
@@ -2413,6 +2860,11 @@ def parseArguments(argv=None):
 		'--skip-screenshots',
 		action='store_true',
 		help='désactive Selenium et les captures de pages HTTPS',
+	)
+	parser.add_argument(
+		'--web-auth',
+		action='store_true',
+		help='analyse l’authentification de la page d’accueil HTTPS (Selenium et chromedriver)',
 	)
 	parser.add_argument(
 		'--skip-graphs',
@@ -2475,6 +2927,7 @@ def main(argv=None):
 		cipherList = getAllCipherSuites(commandSemaphore=commandSemaphore)
 		tlsCartography(
 			captureScreenshots=not args.skip_screenshots,
+			webAuth=args.web_auth,
 			generateGraphs=not args.skip_graphs,
 			generateXlsx=not args.skip_xlsx,
 			inputFile=args.input_file,

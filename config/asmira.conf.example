@@ -38,6 +38,15 @@ checkpoint_every = 25
 # Laisser vide en production. Utiliser 100 pour le premier pilote.
 max_endpoints =
 screenshots = false
+# Authentification des pages d’accueil HTTPS (HTTP natif, fournisseur
+# d’identité, formulaire local) : une visite par FQDN avec Chromium sans
+# interface, sans rien saisir. Exige selenium, chromium et chromedriver.
+web_auth = false
+web_auth_workers = 2
+# Fournisseurs d’identité de l’organisation, séparés par des virgules :
+# « hôte » ou « hôte/chemin » (ex. login.microsoftonline.com/<id-du-tenant>).
+# Vide : aucun fournisseur n’est jugé externe.
+corporate_idp =
 graphs = false
 xlsx = false
 
@@ -77,3 +86,5 @@ dnsx =
 nmap =
 openssl =
 netcat =
+chromium =
+chromedriver =

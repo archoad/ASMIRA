@@ -166,7 +166,25 @@
                     "pqc_kex_algorithms": { "type": "keyword" },
                     "host_key_pqc_status": { "type": "keyword" },
                     "cipher_256": { "type": "boolean" },
-                    "weak_algorithms": { "type": "keyword" }
+                    "weak_algorithms": { "type": "keyword" },
+                    "legacy_macs": { "type": "keyword" }
+                  }
+                },
+                "web_auth": {
+                  "properties": {
+                    "type": { "type": "keyword" },
+                    "http_schemes": { "type": "keyword" },
+                    "http_schemes_text": { "type": "keyword" },
+                    "idp": { "type": "keyword" },
+                    "idp_host": { "type": "keyword" },
+                    "idp_corporate": { "type": "boolean" },
+                    "product": { "type": "keyword" },
+                    "mfa_hints": { "type": "keyword" },
+                    "mfa_hints_text": { "type": "keyword" },
+                    "url": { "type": "keyword", "ignore_above": 2048 },
+                    "login_link": { "type": "boolean" },
+                    "title": { "type": "keyword", "ignore_above": 512 },
+                    "site_url": { "type": "keyword" }
                   }
                 },
                 "open_ports": { "type": "integer" },

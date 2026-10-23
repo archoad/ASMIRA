@@ -1355,6 +1355,7 @@ def testClassifySshModernServer():
 	assert result['ssh_host_key_pqc_status'] == 'classical'
 	assert result['ssh_cipher_256'] is True
 	assert result['ssh_weak_algorithms'] == []
+	assert result['ssh_legacy_macs'] == []
 
 
 def testClassifySshOldServer():
@@ -1370,9 +1371,23 @@ def testClassifySshOldServer():
 	assert result['ssh_pqc_kex_status'] == 'hybrid_sntrup'
 	assert result['ssh_cipher_256'] is False
 	assert result['ssh_weak_algorithms'] == [
-		'aes128-cbc', 'arcfour', 'diffie-hellman-group14-sha1',
-		'hmac-sha1', 'ssh-dss', 'ssh-rsa', 'umac-64@openssh.com',
+		'aes128-cbc', 'arcfour', 'diffie-hellman-group14-sha1', 'ssh-dss', 'ssh-rsa',
 	]
+	# MAC de la configuration par défaut d’OpenSSH : signalés à part.
+	assert result['ssh_legacy_macs'] == ['hmac-sha1', 'umac-64@openssh.com']
+
+
+@pytest.mark.parametrize('mac, legacy, weak', [
+	('hmac-sha1-etm@openssh.com', True, False),
+	('umac-64-etm@openssh.com', True, False),
+	('hmac-sha1-96', True, False),
+	('hmac-md5', False, True),
+	('umac-128-etm@openssh.com', False, False),
+	('hmac-sha2-256-etm@openssh.com', False, False),
+])
+def testSshLegacyMacsAreNotWeakAlgorithms(mac, legacy, weak):
+	assert bool(webTLS.SSH_LEGACY_MACS.match(mac)) is legacy
+	assert bool(webTLS.SSH_WEAK_ALGORITHMS.match(mac)) is weak
 
 
 def testClassifySshWithoutKexinitKeepsBanner():
@@ -1404,3 +1419,238 @@ def testSshIsProbedOncePerAddressAndProvesThePort(monkeypatch):
 	assert first['ssh_pqc_kex_status'] == 'classical'
 	# Un port 22 qui accepte la connexion sans bannière SSH n’est pas compté SSH.
 	assert silent == {'tls_port22': None}
+
+
+@pytest.mark.parametrize('response, expected', [
+	(b'HTTP/1.1 401 Unauthorized\r\nWWW-Authenticate: Basic realm="intranet", charset="UTF-8"\r\n\r\n',
+		{'status': 401, 'schemes': ['Basic']}),
+	(b'HTTP/1.1 401 Unauthorized\r\nWWW-Authenticate: Negotiate\r\nwww-authenticate: NTLM\r\n\r\n',
+		{'status': 401, 'schemes': ['Negotiate', 'NTLM']}),
+	(b'HTTP/1.1 401 Unauthorized\r\nWWW-Authenticate: Digest realm="x", qop="auth", nonce="abc"\r\n\r\n',
+		{'status': 401, 'schemes': ['Digest']}),
+	(b'HTTP/1.1 200 OK\r\nServer: nginx\r\n\r\n', {'status': 200, 'schemes': []}),
+	(b'SSH-2.0-OpenSSH_9.6\r\n', None),
+])
+def testParseHttpAuthResponse(response, expected):
+	assert webTLS.parseHttpAuthResponse(response) == expected
+
+
+def testProbeHttpAuthSendsSniAndReadsHeaders(monkeypatch):
+	calls = {}
+
+	class FakeTlsConnection:
+		def __init__(self):
+			self.chunks = [b'HTTP/1.1 401 Unauthorized\r\nWWW-Authenticate: NTLM\r\n', b'\r\nbody']
+
+		def __enter__(self):
+			return(self)
+
+		def __exit__(self, *args):
+			return(False)
+
+		def sendall(self, data):
+			calls['request'] = data
+
+		def settimeout(self, value):
+			pass
+
+		def recv(self, size):
+			return(self.chunks.pop(0) if self.chunks else b'')
+
+	class FakeContext:
+		check_hostname = True
+		verify_mode = None
+
+		def wrap_socket(self, connection, server_hostname):
+			calls['sni'] = server_hostname
+			return(FakeTlsConnection())
+
+	class FakeRawConnection:
+		def __enter__(self):
+			return(self)
+
+		def __exit__(self, *args):
+			return(False)
+
+	def fakeConnect(address, timeout):
+		calls['address'] = address
+		return(FakeRawConnection())
+
+	monkeypatch.setattr(webTLS.socket, 'create_connection', fakeConnect)
+	monkeypatch.setattr(webTLS.ssl, 'create_default_context', FakeContext)
+
+	result = webTLS.probeHttpAuth('192.0.2.10', 'portal.example.com')
+
+	assert result == {'status': 401, 'schemes': ['NTLM']}
+	assert calls['address'] == ('192.0.2.10', 443)
+	assert calls['sni'] == 'portal.example.com'
+	assert b'Host: portal.example.com\r\n' in calls['request']
+
+
+def testProbeHttpAuthReturnsNoneWithoutAnswer(monkeypatch):
+	def refuse(address, timeout):
+		raise ConnectionRefusedError()
+
+	monkeypatch.setattr(webTLS.socket, 'create_connection', refuse)
+
+	assert webTLS.probeHttpAuth('192.0.2.10', 'portal.example.com') is None
+
+
+@pytest.mark.parametrize('url, expected', [
+	('https://login.microsoftonline.com/0000-tenant/oauth2/v2.0/authorize?client_id=x', ('Microsoft Entra ID', 'login.microsoftonline.com')),
+	('https://contoso.b2clogin.com/contoso.onmicrosoft.com/oauth2/v2.0/authorize', ('Microsoft Entra ID', 'contoso.b2clogin.com')),
+	('https://sts.example.com/adfs/ls/?SAMLRequest=abc', ('ADFS', 'sts.example.com')),
+	('https://sso.example.com/realms/staff/protocol/openid-connect/auth?client_id=x', ('Keycloak', 'sso.example.com')),
+	('https://example.okta.com/app/x/sso/saml', ('Okta', 'example.okta.com')),
+	('https://auth.agentconnect.gouv.fr/api/v2/authorize', ('ProConnect', 'auth.agentconnect.gouv.fr')),
+	('https://idp.example.org/sso?SAMLRequest=abc', ('SAML (non identifié)', 'idp.example.org')),
+	('https://id.example.org/authorize?client_id=a&response_type=code&redirect_uri=https%3A%2F%2Fx', ('OpenID Connect (non identifié)', 'id.example.org')),
+	('https://www.example.com/login', (None, None)),
+	(None, (None, None)),
+])
+def testIdentifyIdp(url, expected):
+	assert webTLS.identifyIdp(url) == expected
+
+
+@pytest.mark.parametrize('url, corporate, expected', [
+	('https://login.microsoftonline.com/0000-tenant/oauth2/authorize', ('login.microsoftonline.com/0000-tenant',), True),
+	('https://login.microsoftonline.com/common/oauth2/authorize', ('login.microsoftonline.com/0000-tenant',), False),
+	('https://sts.example.com/adfs/ls/', ('sts.example.com',), True),
+	# Un préfixe ne vaut que pour un segment complet.
+	('https://sts.example.com.evil.test/adfs/ls/', ('sts.example.com',), False),
+	('https://sts.example.com/adfs/ls/', (), None),
+])
+def testIdpIsCorporate(url, corporate, expected):
+	assert webTLS.idpIsCorporate(url, corporate) == expected
+
+
+def webPage(url='https://www.example.com/', **values):
+	return({
+		'url': url, 'title': 'Accueil', 'password_fields': 0, 'otp_field': False, 'webauthn_field': False,
+		'passkey_text': False, 'login_links': [], 'form_actions': [], 'frames': [], 'generator': '',
+		'text_length': 5000, **values,
+	})
+
+
+@pytest.mark.parametrize('httpAuth, pages, expected', [
+	({'status': 401, 'schemes': ['Basic']}, [], {'web_auth': 'http', 'web_auth_http_schemes': ['Basic']}),
+	# Bearer protège une API : pas d’authentification interactive.
+	({'status': 401, 'schemes': ['Bearer']}, [], {'web_auth': 'unknown'}),
+	(None, [], {'web_auth': 'unknown'}),
+	(None, [webPage()], {'web_auth': 'none', 'web_auth_url': None}),
+	(None, [webPage('https://login.microsoftonline.com/t/oauth2/authorize?state=secret', password_fields=1)], {
+		'web_auth': 'sso', 'web_auth_idp': 'Microsoft Entra ID', 'web_auth_idp_host': 'login.microsoftonline.com',
+		'web_auth_url': 'https://login.microsoftonline.com/t/oauth2/authorize',
+	}),
+	(None, [webPage(form_actions=['https://sts.example.com/adfs/ls/?wa=wsignin1.0'])], {
+		'web_auth': 'sso', 'web_auth_idp': 'ADFS',
+	}),
+	(None, [webPage('https://www.example.com/login', password_fields=1, otp_field=True, passkey_text=True)], {
+		'web_auth': 'local_form', 'web_auth_url': 'https://www.example.com/login',
+		'web_auth_mfa_hints': ['passkey', 'otp'],
+	}),
+	(None, [webPage('https://vpn.example.com/remote/login?lang=fr')], {
+		'web_auth': 'local_form', 'web_auth_product': 'Fortinet SSL VPN',
+	}),
+	(None, [webPage(), webPage('https://www.example.com/connexion', password_fields=1)], {
+		'web_auth': 'local_form', 'web_auth_login_link': True,
+	}),
+])
+def testClassifyWebAuth(httpAuth, pages, expected):
+	result = webTLS.classifyWebAuth(httpAuth, pages)
+
+	assert {key: result[key] for key in expected} == expected
+	assert 'state=' not in str(result['web_auth_url'])
+
+
+def testChooseLoginLinkStaysOnSiteOrKnownIdp():
+	page = webPage(login_links=[
+		'https://partner.test/login',
+		'https://login.microsoftonline.com/t/oauth2/authorize',
+		'https://espace.example.com/connexion',
+	])
+
+	assert webTLS.chooseLoginLink(page, 'example.com') == 'https://login.microsoftonline.com/t/oauth2/authorize'
+	assert webTLS.chooseLoginLink(webPage(login_links=['https://partner.test/login']), 'example.com') is None
+
+
+def testRenderWebAuthFollowsOneLoginLink(monkeypatch):
+	class FakeDriver:
+		def __init__(self):
+			self.visited = []
+			self.pages = [
+				webPage(login_links=['https://www.example.com/connexion']),
+				webPage('https://www.example.com/connexion', password_fields=1),
+			]
+			self.quitCalled = False
+
+		def get(self, url):
+			self.visited.append(url)
+
+		def execute_script(self, script):
+			return(self.pages.pop(0))
+
+		def quit(self):
+			self.quitCalled = True
+
+	driver = FakeDriver()
+	created = []
+
+	def fakeCreate(host, hostip=None):
+		created.append((host, hostip))
+		return(driver)
+
+	monkeypatch.setattr(webTLS, 'createWebDriver', fakeCreate)
+	monkeypatch.setattr(webTLS, 'WEB_AUTH_RENDER_DELAY', 0)
+	monkeypatch.setattr(webTLS, 'WEB_AUTH_SPA_DELAY', 0)
+
+	pages = webTLS.renderWebAuth('www.example.com', '192.0.2.10', 'example.com')
+
+	assert created == [('www.example.com', '192.0.2.10')]
+	assert driver.visited == ['https://www.example.com/', 'https://www.example.com/connexion']
+	assert len(pages) == 2
+	assert driver.quitCalled is True
+
+
+def testWebAuthObservationSkipsBrowserForHttpAuth(monkeypatch):
+	monkeypatch.setattr(webTLS, 'probeHttpAuth', lambda hostip, host: {'status': 401, 'schemes': ['NTLM']})
+	monkeypatch.setattr(webTLS, 'renderWebAuth', lambda *args: pytest.fail('navigateur lancé'))
+
+	result = webTLS.webAuthObservation('owa.example.com', '192.0.2.10')
+
+	assert result['web_auth'] == 'http'
+	assert result['web_auth_ip'] == '192.0.2.10'
+
+
+def testAnalyseWebAuthenticationVisitsEachFqdnOnce(monkeypatch):
+	calls = []
+
+	def fakeObservation(host, hostip, registeredDomain=None, corporateIdp=()):
+		calls.append((host, hostip, registeredDomain, corporateIdp))
+		return({'web_auth': 'sso', 'web_auth_idp': 'ADFS'})
+
+	monkeypatch.setattr(webTLS, 'webAuthAvailability', lambda: None)
+	monkeypatch.setattr(webTLS, 'webAuthObservation', fakeObservation)
+	items = [
+		{'host': 'www.example.com', 'ip': '192.0.2.20', 'port443': 'open', 'certificate_sha256': 'a', 'domain_name': 'example.com'},
+		{'host': 'www.example.com', 'ip': '192.0.2.3', 'port443': 'open', 'certificate_sha256': 'a', 'domain_name': 'example.com'},
+		# Sans certificat, pas de page HTTPS à analyser.
+		{'host': 'mail.example.com', 'ip': '192.0.2.4', 'port443': 'open'},
+		# Déjà observé avant une reprise de checkpoint.
+		{'host': 'done.example.com', 'ip': '192.0.2.5', 'port443': 'open', 'certificate_sha256': 'b', 'web_auth': 'none'},
+	]
+
+	visited = webTLS.analyseWebAuthentication(items, corporateIdp=('sts.example.com',))
+
+	assert visited == 1
+	assert calls == [('www.example.com', '192.0.2.3', 'example.com', ('sts.example.com',))]
+	assert [item.get('web_auth') for item in items] == ['sso', 'sso', None, 'none']
+
+
+def testAnalyseWebAuthenticationNeedsChromedriver(monkeypatch):
+	monkeypatch.setattr(webTLS, 'webAuthAvailability', lambda: 'chromedriver absent ou non exécutable')
+	monkeypatch.setattr(webTLS, 'webAuthObservation', lambda *args: pytest.fail('analyse lancée'))
+	items = [{'host': 'www.example.com', 'ip': '192.0.2.3', 'port443': 'open', 'certificate_sha256': 'a'}]
+
+	assert webTLS.analyseWebAuthentication(items) == 0
+	assert 'web_auth' not in items[0]

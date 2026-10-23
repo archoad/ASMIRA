@@ -235,9 +235,11 @@ SSH_KEX_ORDER = ('classical', 'pure', 'hybrid_sntrup', 'hybrid')
 
 def analyseSsh(events):
 	"""Serveurs SSH comptés par adresse (une machine sert souvent plusieurs FQDN) :
-	statut d’échange de clés le plus faible vu pour l’adresse, et algorithmes obsolètes."""
+	statut d’échange de clés le plus faible vu pour l’adresse, algorithmes obsolètes
+	et MAC hérités."""
 	statusByAddress = {}
 	weakAddresses = set()
+	legacyAddresses = set()
 	for event in events:
 		ssh = exposureOf(event).get('ssh') or {}
 		statuses = ssh.get('pqc_kex_status') or []
@@ -250,7 +252,48 @@ def analyseSsh(events):
 				statusByAddress[address] = worst
 			if ssh.get('weak_algorithms'):
 				weakAddresses.add(address)
-	return({'kex': Counter(statusByAddress.values()), 'weak': len(weakAddresses)})
+			if ssh.get('legacy_macs'):
+				legacyAddresses.add(address)
+	return({
+		'kex': Counter(statusByAddress.values()),
+		'weak': len(weakAddresses),
+		'legacy_macs': len(legacyAddresses),
+	})
+
+
+WEB_AUTH_LABELS = {
+	'sso': 'Fournisseur d’identité',
+	'local_form': 'Formulaire local',
+	'http': 'HTTP natif (Basic, NTLM…)',
+	'none': 'Sans authentification',
+	'unknown': 'Indéterminé',
+}
+WEB_AUTH_PORTAL_ORDER = ('http', 'local_form', 'sso')
+
+
+def analyseWebAuth(events):
+	"""Portails authentifiés (HTTP natif, formulaire local, fournisseur
+	d’identité), du moins au plus sûr, et répartition des FQDN analysés."""
+	types = Counter()
+	portals = []
+	for event in events:
+		webAuth = exposureOf(event).get('web_auth') or {}
+		if not webAuth.get('type'):
+			continue
+		types[webAuth['type']] += 1
+		if webAuth['type'] in WEB_AUTH_PORTAL_ORDER:
+			portals.append(event)
+	portals.sort(key=lambda event: (
+		WEB_AUTH_PORTAL_ORDER.index(exposureOf(event)['web_auth']['type']), fqdnOf(event),
+	))
+	webAuths = [exposureOf(event)['web_auth'] for event in portals]
+	return({
+		'types': types,
+		'portals': portals,
+		'sso_corporate': sum(webAuth.get('idp_corporate') is True for webAuth in webAuths),
+		'sso_external': sum(webAuth.get('idp_corporate') is False for webAuth in webAuths),
+		'passkey': sum('passkey' in (webAuth.get('mfa_hints') or []) for webAuth in webAuths),
+	})
 
 
 def analyseExposure(exposureEvents, previousEvents, partial):
@@ -321,6 +364,7 @@ def analyseExposure(exposureEvents, previousEvents, partial):
 			status for event in events for status in tlsOf(event).get('certificate_pqc_status') or []
 		),
 		'ssh': analyseSsh(events),
+		'web_auth': analyseWebAuth(events),
 		'expired': sorted((item for item in remaining if item[1] < 0), key=lambda item: item[1]),
 		'expiring': sorted(
 			(item for item in remaining if 0 <= item[1] < asmiraGrade.EXPIRY_WARNING_DAYS),
@@ -568,6 +612,16 @@ def renderSummary(analysis):
 			f'Certificats : {fmt(len(exposure["expired"]))} expirés, {fmt(len(exposure["expiring"]))} expirent '
 			f'sous {asmiraGrade.EXPIRY_WARNING_DAYS} jours.',
 		]
+		webAuthTypes = (exposure.get('web_auth') or {}).get('types') or Counter()
+		portalCount = len((exposure.get('web_auth') or {}).get('portals') or [])
+		if portalCount:
+			lines.append(
+				f'Authentification web : {fmt(portalCount)} portail(s) authentifié(s), dont '
+				f'{fmt(webAuthTypes.get("sso", 0))} délégué(s) à un fournisseur d’identité '
+				f'({percent(webAuthTypes.get("sso", 0), portalCount)}), '
+				f'{fmt(webAuthTypes.get("local_form", 0))} formulaire(s) local(aux) et '
+				f'{fmt(webAuthTypes.get("http", 0))} en HTTP natif.'
+			)
 	else:
 		lines.append(
 			f'Découverte : {fmt(counts.get("resolvable_hosts", 0))} FQDN résolus ; pas de cartographie active.'
@@ -1018,7 +1072,8 @@ def renderTls(analysis, maxItems):
 			f'{fmt(kex.get("hybrid", 0))} proposent un échange de clés hybride ML-KEM (cible ANSSI), '
 			f'{fmt(kex.get("hybrid_sntrup", 0))} seulement NTRU Prime (hybride non normalisé), '
 			f'{fmt(kex.get("classical", 0) + kex.get("pure", 0))} aucun échange hybride ; '
-			f'{fmt(ssh.get("weak", 0))} proposent encore des algorithmes obsolètes.'
+			f'{fmt(ssh.get("weak", 0))} proposent encore des algorithmes obsolètes et '
+			f'{fmt(ssh.get("legacy_macs", 0))} des MAC hérités (hmac-sha1, umac-64).'
 		))
 	return(section('tls', '4. État TLS et post-quantique', *parts))
 
@@ -1154,6 +1209,47 @@ def renderPorts(analysis, maxItems):
 	return(section('ports', '7. Ports, chiffrement et hébergement', *parts))
 
 
+def renderWebAuth(analysis, maxItems):
+	webAuth = analysis['exposure'].get('web_auth') or {}
+	types = webAuth.get('types') or Counter()
+	if not types:
+		return(Html(''))
+	portals = webAuth['portals']
+	parts = [
+		paragraph(
+			'Authentification de la page d’accueil HTTPS, observée une fois par FQDN sans rien saisir. '
+			'Le second facteur n’est demandé qu’après un mot de passe valide : il n’est pas observable de '
+			'l’extérieur. Un portail délégué au fournisseur d’identité de l’organisation hérite de sa politique '
+			'MFA ; un formulaire local ne prouve rien ; l’authentification HTTP native n’en permet aucun. '
+			f'{fmt(types.get("sso", 0))} des {fmt(len(portals))} portails authentifiés '
+			f'({percent(types.get("sso", 0), len(portals))}) délèguent leur authentification'
+			+ (
+				f', dont {fmt(webAuth["sso_corporate"])} au fournisseur de l’organisation'
+				if webAuth['sso_corporate'] or webAuth['sso_external'] else ''
+			)
+			+ f' ; {fmt(webAuth["passkey"])} proposent une clé d’accès (passkey).'
+		),
+		table(('Authentification', 'FQDN'), [
+			(label, fmt(types.get(code, 0))) for code, label in WEB_AUTH_LABELS.items() if types.get(code)
+		], numeric=(1,)),
+	]
+	if portals:
+		parts.append(collapsible('Portails authentifiés', table(
+			('FQDN', 'Authentification', 'Fournisseur ou produit', 'Indices MFA'),
+			[
+				(
+					fqdnOf(event),
+					WEB_AUTH_LABELS.get(exposureOf(event)['web_auth']['type'], exposureOf(event)['web_auth']['type']),
+					exposureOf(event)['web_auth'].get('idp') or exposureOf(event)['web_auth'].get('product')
+					or ', '.join(exposureOf(event)['web_auth'].get('http_schemes') or []) or '—',
+					', '.join(exposureOf(event)['web_auth'].get('mfa_hints') or []) or '—',
+				)
+				for event in portals[:maxItems]
+			],
+		), len(portals), maxItems))
+	return(section('authentification', '8. Authentification web', *parts))
+
+
 STYLE = """
 :root{--bg:#f6f7f9;--card:#fff;--ink:#1d2330;--muted:#677084;--line:#dde1e8;--accent:#2f5bd3;
 --good:#1f8a4c;--warn:#c27a00;--bad:#c62f2f;--soft:#eef1f6}
@@ -1226,6 +1322,9 @@ def renderHtml(analysis, maxItems=50):
 			renderSurface(analysis, maxItems), renderTls(analysis, maxItems),
 			renderCertificates(analysis, maxItems), renderFindings(analysis), renderPorts(analysis, maxItems),
 		]
+		if (analysis['exposure'].get('web_auth') or {}).get('types'):
+			sections.append(renderWebAuth(analysis, maxItems))
+			navigation.append(('authentification', 'Authentification web'))
 		navigation += [
 			('surface', 'Surface'), ('tls', 'TLS et PQC'), ('certificats', 'Certificats et CAA'),
 			('constats', 'Constats'), ('ports', 'Ports et hébergement'),

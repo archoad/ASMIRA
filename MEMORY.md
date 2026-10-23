@@ -610,3 +610,28 @@ Points techniques retenus :
   n’est volontairement pas signalée. Dashboard : sous-section SSH comptée par
   adresse ; bilan e-mail : ligne SSH. Limite : seul le port 22 est sondé
   (le SSH de `srv` écoute sur 42). Validé sur OpenSSH 10.0 de `srv`.
+- **2026-10-22 — Authentification web et MFA (étape 1).** But de l’utilisateur :
+  mesurer l’écart à la politique « MFA systématique » sans visionner de
+  captures. Le MFA n’est pas observable de l’extérieur (il suit un mot de passe
+  valide ; tenter une connexion est exclu) : `analyseWebAuthentication` charge
+  une fois par FQDN servi en HTTPS la page d’accueil dans Chromium sans
+  interface (Selenium, chromedriver de la distribution, jamais Selenium
+  Manager), sans rien saisir, suit au plus un lien de connexion du site ou d’un
+  fournisseur connu, et classe `web_auth` en `sso`, `local_form`, `http`
+  (401 Basic/Digest/NTLM/Negotiate ; Bearer exclu), `none` ou `unknown`.
+  Champs `asmira.exposure.web_auth.*`, URL sans requête ni fragment. Constats
+  hors note `WEB_AUTH_HTTP` (high), `WEB_AUTH_LOCAL_FORM` (medium),
+  `WEB_AUTH_EXTERNAL_IDP` (low, seulement si `corporate_idp` est déclaré).
+  Indicateur : part des portails authentifiés délégués au fournisseur de
+  l’organisation. Dashboard : section « Authentification web » ; le tableau des
+  portails utilise la data view enregistrée (`data_view_reference`) pour porter
+  le format d’URL « Ouvrir le site » (`DATA_VIEW_FIELD_FORMATS`). Étape 2
+  envisagée : croiser avec l’export du fournisseur d’identité (politiques MFA).
+  Désactivé par défaut (`web_auth = false`).
+- **2026-10-23 — MAC SSH hérités.** Premier run SSH : `SSH_WEAK_ALGORITHMS`
+  touchait 32 serveurs sur 34, dont 14 seulement à cause de `hmac-sha1` et
+  `umac-64` (configuration par défaut d’OpenSSH, sans attaque pratique).
+  Décision de l’utilisateur : les signaler à part, `SSH_LEGACY_MAC` (low),
+  champ `asmira.exposure.ssh.legacy_macs`. Le run qui suit le déploiement
+  montre des `SSH_WEAK_ALGORITHMS` « corrigés » et des `SSH_LEGACY_MAC`
+  « apparus » : artefact de transition.
