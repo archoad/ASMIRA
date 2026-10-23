@@ -147,28 +147,148 @@
     {
       "type": "vis",
       "config": {
-        "type": "pie",
+        "type": "xy",
         "title": "Notes TLS des FQDN",
-        "data_source": {
-          "type": "data_view_spec",
-          "index_pattern": "asmira-exposure-current",
-          "time_field": "@timestamp"
+        "axis": {
+          "x": {
+            "title": {
+              "visible": false
+            }
+          },
+          "y": {
+            "title": {
+              "visible": false
+            }
+          }
         },
-        "metrics": [
+        "layers": [
           {
-            "operation": "count",
-            "label": "FQDN"
+            "type": "bar_stacked",
+            "data_source": {
+              "type": "esql",
+              "query": "FROM asmira-exposure-current | WHERE asmira.exposure.tls.grade IS NOT NULL | EVAL Note = asmira.exposure.tls.grade | STATS FQDN = COUNT(*) BY Note | EVAL Rang = CASE(Note == \"T\", 0, Note == \"M\", 1, Note == \"F\", 2, Note == \"E\", 3, Note == \"D\", 4, Note == \"C\", 5, Note == \"B\", 6, Note == \"A-\", 7, Note == \"A\", 8, Note == \"A+\", 9, Note == \"NA\", 10, 11) | SORT Rang ASC | KEEP Note, FQDN"
+            },
+            "x": {
+              "column": "Note"
+            },
+            "y": [
+              {
+                "column": "FQDN"
+              }
+            ],
+            "breakdown_by": {
+              "column": "Note",
+              "color": {
+                "mode": "categorical",
+                "palette": "default",
+                "mapping": [
+                  {
+                    "values": [
+                      "T"
+                    ],
+                    "color": {
+                      "type": "color_code",
+                      "value": "#7A1020"
+                    }
+                  },
+                  {
+                    "values": [
+                      "M"
+                    ],
+                    "color": {
+                      "type": "color_code",
+                      "value": "#A31D2C"
+                    }
+                  },
+                  {
+                    "values": [
+                      "F"
+                    ],
+                    "color": {
+                      "type": "color_code",
+                      "value": "#BD271E"
+                    }
+                  },
+                  {
+                    "values": [
+                      "E"
+                    ],
+                    "color": {
+                      "type": "color_code",
+                      "value": "#D2561E"
+                    }
+                  },
+                  {
+                    "values": [
+                      "D"
+                    ],
+                    "color": {
+                      "type": "color_code",
+                      "value": "#E07B22"
+                    }
+                  },
+                  {
+                    "values": [
+                      "C"
+                    ],
+                    "color": {
+                      "type": "color_code",
+                      "value": "#E5A823"
+                    }
+                  },
+                  {
+                    "values": [
+                      "B"
+                    ],
+                    "color": {
+                      "type": "color_code",
+                      "value": "#B5C334"
+                    }
+                  },
+                  {
+                    "values": [
+                      "A-"
+                    ],
+                    "color": {
+                      "type": "color_code",
+                      "value": "#6DB36F"
+                    }
+                  },
+                  {
+                    "values": [
+                      "A"
+                    ],
+                    "color": {
+                      "type": "color_code",
+                      "value": "#2E8B57"
+                    }
+                  },
+                  {
+                    "values": [
+                      "A+"
+                    ],
+                    "color": {
+                      "type": "color_code",
+                      "value": "#1B7A3E"
+                    }
+                  },
+                  {
+                    "values": [
+                      "NA"
+                    ],
+                    "color": {
+                      "type": "color_code",
+                      "value": "#98A2B3"
+                    }
+                  }
+                ]
+              }
+            }
           }
         ],
-        "group_by": [
-          {
-            "operation": "terms",
-            "fields": [
-              "asmira.exposure.tls.grade"
-            ],
-            "limit": 12
-          }
-        ]
+        "legend": {
+          "visibility": "hidden"
+        }
       },
       "grid": {
         "x": 0,
@@ -198,28 +318,124 @@
           {
             "type": "bar_stacked",
             "data_source": {
-              "type": "data_view_spec",
-              "index_pattern": "asmira-exposure-current",
-              "time_field": "@timestamp"
+              "type": "esql",
+              "query": "FROM asmira-exposure-current | WHERE asmira.exposure.tls.grade IS NOT NULL | EVAL Note = asmira.exposure.tls.grade | STATS FQDN = COUNT(*) BY Domaine = server.registered_domain, Note | EVAL Rang = CASE(Note == \"T\", 0, Note == \"M\", 1, Note == \"F\", 2, Note == \"E\", 3, Note == \"D\", 4, Note == \"C\", 5, Note == \"B\", 6, Note == \"A-\", 7, Note == \"A\", 8, Note == \"A+\", 9, Note == \"NA\", 10, 11) | SORT Rang ASC, FQDN DESC | KEEP Domaine, Note, FQDN"
             },
             "x": {
-              "operation": "terms",
-              "fields": [
-                "server.registered_domain"
-              ],
-              "limit": 20
+              "column": "Domaine"
             },
             "y": [
               {
-                "operation": "count"
+                "column": "FQDN"
               }
             ],
             "breakdown_by": {
-              "operation": "terms",
-              "fields": [
-                "asmira.exposure.tls.grade"
-              ],
-              "limit": 12
+              "column": "Note",
+              "color": {
+                "mode": "categorical",
+                "palette": "default",
+                "mapping": [
+                  {
+                    "values": [
+                      "T"
+                    ],
+                    "color": {
+                      "type": "color_code",
+                      "value": "#7A1020"
+                    }
+                  },
+                  {
+                    "values": [
+                      "M"
+                    ],
+                    "color": {
+                      "type": "color_code",
+                      "value": "#A31D2C"
+                    }
+                  },
+                  {
+                    "values": [
+                      "F"
+                    ],
+                    "color": {
+                      "type": "color_code",
+                      "value": "#BD271E"
+                    }
+                  },
+                  {
+                    "values": [
+                      "E"
+                    ],
+                    "color": {
+                      "type": "color_code",
+                      "value": "#D2561E"
+                    }
+                  },
+                  {
+                    "values": [
+                      "D"
+                    ],
+                    "color": {
+                      "type": "color_code",
+                      "value": "#E07B22"
+                    }
+                  },
+                  {
+                    "values": [
+                      "C"
+                    ],
+                    "color": {
+                      "type": "color_code",
+                      "value": "#E5A823"
+                    }
+                  },
+                  {
+                    "values": [
+                      "B"
+                    ],
+                    "color": {
+                      "type": "color_code",
+                      "value": "#B5C334"
+                    }
+                  },
+                  {
+                    "values": [
+                      "A-"
+                    ],
+                    "color": {
+                      "type": "color_code",
+                      "value": "#6DB36F"
+                    }
+                  },
+                  {
+                    "values": [
+                      "A"
+                    ],
+                    "color": {
+                      "type": "color_code",
+                      "value": "#2E8B57"
+                    }
+                  },
+                  {
+                    "values": [
+                      "A+"
+                    ],
+                    "color": {
+                      "type": "color_code",
+                      "value": "#1B7A3E"
+                    }
+                  },
+                  {
+                    "values": [
+                      "NA"
+                    ],
+                    "color": {
+                      "type": "color_code",
+                      "value": "#98A2B3"
+                    }
+                  }
+                ]
+              }
             }
           }
         ],
@@ -256,7 +472,7 @@
             "type": "bar_stacked",
             "data_source": {
               "type": "esql",
-              "query": "FROM logs-asmira.exposure-* | WHERE asmira.exposure.present == true AND asmira.exposure.tls.grade IS NOT NULL | EVAL Jour = DATE_TRUNC(1 day, @timestamp), Note = asmira.exposure.tls.grade | STATS FQDN = COUNT(*) BY Jour, Note | SORT Jour ASC"
+              "query": "FROM logs-asmira.exposure-* | WHERE asmira.exposure.present == true AND asmira.exposure.tls.grade IS NOT NULL | EVAL Jour = DATE_TRUNC(1 day, @timestamp), Note = asmira.exposure.tls.grade | STATS FQDN = COUNT(*) BY Jour, Note | EVAL Rang = CASE(Note == \"T\", 0, Note == \"M\", 1, Note == \"F\", 2, Note == \"E\", 3, Note == \"D\", 4, Note == \"C\", 5, Note == \"B\", 6, Note == \"A-\", 7, Note == \"A\", 8, Note == \"A+\", 9, Note == \"NA\", 10, 11) | SORT Rang ASC, Jour ASC | KEEP Jour, Note, FQDN"
             },
             "x": {
               "column": "Jour"
@@ -267,7 +483,112 @@
               }
             ],
             "breakdown_by": {
-              "column": "Note"
+              "column": "Note",
+              "color": {
+                "mode": "categorical",
+                "palette": "default",
+                "mapping": [
+                  {
+                    "values": [
+                      "T"
+                    ],
+                    "color": {
+                      "type": "color_code",
+                      "value": "#7A1020"
+                    }
+                  },
+                  {
+                    "values": [
+                      "M"
+                    ],
+                    "color": {
+                      "type": "color_code",
+                      "value": "#A31D2C"
+                    }
+                  },
+                  {
+                    "values": [
+                      "F"
+                    ],
+                    "color": {
+                      "type": "color_code",
+                      "value": "#BD271E"
+                    }
+                  },
+                  {
+                    "values": [
+                      "E"
+                    ],
+                    "color": {
+                      "type": "color_code",
+                      "value": "#D2561E"
+                    }
+                  },
+                  {
+                    "values": [
+                      "D"
+                    ],
+                    "color": {
+                      "type": "color_code",
+                      "value": "#E07B22"
+                    }
+                  },
+                  {
+                    "values": [
+                      "C"
+                    ],
+                    "color": {
+                      "type": "color_code",
+                      "value": "#E5A823"
+                    }
+                  },
+                  {
+                    "values": [
+                      "B"
+                    ],
+                    "color": {
+                      "type": "color_code",
+                      "value": "#B5C334"
+                    }
+                  },
+                  {
+                    "values": [
+                      "A-"
+                    ],
+                    "color": {
+                      "type": "color_code",
+                      "value": "#6DB36F"
+                    }
+                  },
+                  {
+                    "values": [
+                      "A"
+                    ],
+                    "color": {
+                      "type": "color_code",
+                      "value": "#2E8B57"
+                    }
+                  },
+                  {
+                    "values": [
+                      "A+"
+                    ],
+                    "color": {
+                      "type": "color_code",
+                      "value": "#1B7A3E"
+                    }
+                  },
+                  {
+                    "values": [
+                      "NA"
+                    ],
+                    "color": {
+                      "type": "color_code",
+                      "value": "#98A2B3"
+                    }
+                  }
+                ]
+              }
             }
           }
         ],

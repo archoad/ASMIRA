@@ -653,3 +653,9 @@ Points techniques retenus :
   `exposureState` inclut `web_auth.idp_corporate`. Panneaux SSH : par adresse,
   seule l’observation la plus récente (`MAX` de « horodatage#serveur »), pour
   qu’un run partiel ne produise pas deux lignes pour une même adresse.
+- **2026-10-23 — Ordre et couleurs des notes.** Demande de l’utilisateur : les
+  graphes de notes (« Notes TLS des FQDN », « par domaine », « Évolution ») sont
+  en ES|QL, triés par rang (T, M, F, E, D, C, B, A-, A, A+, puis NA) avec un
+  dégradé rouge sombre → vert fixé par note ; le graphe Vega partage la palette
+  (M passé du violet au rouge). Kibana suit l’ordre des lignes ES|QL ; rendu
+  à confirmer à l’écran par l’utilisateur.

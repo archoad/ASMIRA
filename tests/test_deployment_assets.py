@@ -4,6 +4,7 @@ from pathlib import Path
 import pytest
 
 import asmiraCommon
+import asmiraGrade
 import elastic.setup as elasticSetup
 
 
@@ -286,6 +287,9 @@ def testElasticJsonAssetsAreValidAndDashboardIsGlobal():
 	# Kibana masque la légende des XY par défaut : la forcer dès qu’il y a plusieurs séries.
 	for panel in xyPanels:
 		layer = panel['config']['layers'][0]
+		# Une ventilation sur la colonne de l’axe ne sert qu’à colorer les barres.
+		if layer.get('breakdown_by', {}).get('column') == layer['x'].get('column'):
+			continue
 		if 'breakdown_by' in layer or len(layer['y']) > 1:
 			assert panel['config']['legend'] == {'visibility': 'visible'}
 	for title, expected in (
@@ -597,3 +601,21 @@ def testEnsureTransformOnlyUpdatesMutableFields():
 	assert updatePayload['frequency'] == definition['frequency']
 	assert updatePayload['sync'] == definition['sync']
 	assert 'retention_policy' not in updatePayload
+
+
+def testGradeChartsAreOrderedFromWorstToBestWithAGradient():
+	dashboard = json.loads((BASE_DIR / 'elastic/kibana/asmira-global-dashboard.json').read_text())
+	expected = ['T', 'M', 'F', 'E', 'D', 'C', 'B', 'A-', 'A', 'A+', 'NA']
+	# Les notes réelles de asmiraGrade, de la pire à la meilleure, puis NA.
+	assert expected[:-1] == list(reversed(asmiraGrade.GRADE_ORDER))
+	for title in ('Notes TLS des FQDN', 'Notes TLS par domaine', 'Évolution des notes TLS'):
+		config = next(panel['config'] for panel in dashboard['panels'] if panel['config'].get('title') == title)
+		layer = config['layers'][0] if 'layers' in config else config
+		grouping = layer['breakdown_by'] if 'layers' in config else layer['group_by'][0]
+		query = layer['data_source']['query']
+		assert layer['data_source']['type'] == 'esql'
+		assert '| SORT Rang ASC' in query
+		assert [f'Note == "{grade}", {rank}' in query for rank, grade in enumerate(expected)] == [True] * len(expected)
+		mapping = grouping['color']['mapping']
+		assert [entry['values'][0] for entry in mapping] == expected
+		assert mapping[0]['color']['value'] == '#7A1020' and mapping[9]['color']['value'] == '#1B7A3E'
