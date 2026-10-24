@@ -15,7 +15,6 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 import asmiraShare
-import elastic.setup as elasticSetup
 
 
 BULK_ACTIONS = 1000
@@ -136,7 +135,18 @@ def parseArguments(argv=None):
 	return(args)
 
 
-def main(argv=None, clientFactory=elasticSetup.clientFromEnvironment, post=postBulk):
+def clientFromEnvironment(url, prefix, caCert):
+	# Importé à l’usage : un --dry-run n’a besoin que de asmiraShare.py.
+	try:
+		import elastic.setup as elasticSetup
+	except ImportError as error:
+		raise RuntimeError(
+			'elastic/setup.py introuvable : lancer l’import depuis le code source d’ASMIRA'
+		) from error
+	return(elasticSetup.clientFromEnvironment(url, prefix, caCert))
+
+
+def main(argv=None, clientFactory=clientFromEnvironment, post=postBulk):
 	args = parseArguments(argv)
 	try:
 		signer, manifest, events, report = openBundle(args)
