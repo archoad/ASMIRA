@@ -682,3 +682,20 @@ Points techniques retenus :
   transforms synchronisées sur `event.ingested`. La mise à jour impose
   `install.sh`, `elastic/setup.py` puis le complément d’`event.ingested` sur
   l’historique avant le premier run.
+- **2026-10-24 — Partage des résultats (v1.3.0, en cours).** Besoin : des
+  entités ne peuvent pas scanner (filtrage web, pare-feu). Décisions de
+  l’utilisateur : un **paquet global** (pas un par domaine ; les droits
+  d’accès au dashboard sont gérés à part), sans `asmira.raw.endpoints`,
+  chiffré avec **age**, import **manuel**, `max_attachment_mb = 10`.
+  `[share]` (`enabled`, `email_to`, `recipient` = **une seule** clé publique
+  age par sonde, tous domaines confondus — l’accès aux données est géré par
+  l’utilisateur hors d’ASMIRA —, `signing_key` = clé SSH ed25519, `max_attachment_mb`) ; `asmiraShare`
+  construit le tar.gz (manifeste d’empreintes, NDJSON, bilan), le chiffre et
+  le signe (`ssh-keygen -Y sign`, namespace `asmira-share`) dans
+  `runs/<run-id>/` ; `asmiraReport.sendShareBundle` l’envoie par le relais de
+  `[report]` (taille mesurée encodée en base64). `asmiraImport.py` vérifie,
+  déchiffre et contrôle en mémoire, puis `_bulk` en `create` avec
+  `_id = event.id`, le run en dernier ; run déjà présent ignoré sans
+  `--force`. Essai sur `srv` avec les exports du 23 octobre : 2,1 Mo chiffrés,
+  2,9 Mo encodés, signature et lecture validées ; `_bulk` validé seulement
+  par les tests (pas d’Elasticsearch de test).

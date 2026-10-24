@@ -9,6 +9,7 @@ de l’e-mail. Ces fonctions sont pures ; seul sendRunReport() fait des I/O.
 """
 
 import email.utils
+import hashlib
 import html
 import os
 import smtplib
@@ -17,8 +18,10 @@ import ssl
 from collections import Counter, defaultdict
 from datetime import datetime, timezone
 from email.message import EmailMessage
+from pathlib import Path
 
 import asmiraGrade
+import asmiraShare
 from asmiraCommon import decodeSshServer
 
 
@@ -1343,26 +1346,96 @@ def defaultSender():
 	return(f'asmira@{socket.getfqdn()}')
 
 
+def newMessage(subject, recipients, body, config):
+	sender = config.reportEmailFrom or defaultSender()
+	message = EmailMessage()
+	message['Subject'] = subject
+	message['From'] = sender
+	message['To'] = ', '.join(recipients)
+	message['Date'] = email.utils.formatdate(localtime=True)
+	message['Message-ID'] = email.utils.make_msgid(domain=sender.rsplit('@', 1)[-1])
+	message.set_content(body, subtype='plain', charset='utf-8')
+	return(message)
+
+
 def sendRunReport(summary, reportHtml, analysis, config, smtpFactory=smtplib.SMTP, environ=None):
 	"""Envoie le résumé (corps texte) et le bilan HTML (pièce jointe) aux
 	destinataires de [report] email_to. Le mot de passe SMTP éventuel vient de
 	l’environnement."""
-	environ = os.environ if environ is None else environ
 	runId = analysis['run'].get('id')
-	sender = config.reportEmailFrom or defaultSender()
-	message = EmailMessage()
-	message['Subject'] = reportSubject(analysis)
-	message['From'] = sender
-	message['To'] = ', '.join(config.reportEmailTo)
-	message['Date'] = email.utils.formatdate(localtime=True)
-	message['Message-ID'] = email.utils.make_msgid(domain=sender.rsplit('@', 1)[-1])
-	message.set_content(summary, subtype='plain', charset='utf-8')
+	message = newMessage(reportSubject(analysis), config.reportEmailTo, summary, config)
 	message.add_attachment(
 		reportHtml.encode('utf-8'),
 		maintype='text',
 		subtype='html',
 		filename=f'asmira_report_{runId}.html',
 	)
+	return(deliverMessage(message, config, smtpFactory, environ))
+
+
+def shareSummary(runEvent, bundleFile, signatureFile, attached, encodedBytes, maxBytes):
+	run = runEvent.get('asmira', {}).get('run', {})
+	runId = run.get('id')
+	content = Path(bundleFile).read_bytes()
+	lines = [
+		f'Données du run ASMIRA {runId} ({statusLabel(run)}), '
+		f'du {localTime(run.get("started_at"))} au {localTime(run.get("finished_at"))}.',
+		'',
+		f'Paquet : {Path(bundleFile).name} ({fmt(len(content))} octets)',
+		f'SHA-256 : {hashlib.sha256(content).hexdigest()}',
+		f'Signature : {Path(signatureFile).name}' if signatureFile else 'Signature : aucune (paquet non signé)',
+		'',
+	]
+	if attached:
+		lines += [
+			'Import dans Elasticsearch (voir le guide « Partage des résultats ») :',
+			'',
+			f'  python3 asmiraImport.py --identity <identité age> '
+			f'--allowed-signers <signataires autorisés> --elasticsearch-url https://<hôte>:9200 '
+			f'{Path(bundleFile).name}',
+		]
+	else:
+		lines += [
+			f'Le paquet n’est pas joint : encodé, il pèse {encodedBytes / 1_000_000:.1f} Mo, '
+			f'au-delà de [share] max_attachment_mb ({maxBytes / 1_000_000:.0f} Mo).',
+			f'Il reste sur la sonde jusqu’au run suivant : {bundleFile}',
+		]
+	return('\n'.join(lines) + '\n')
+
+
+def sendShareBundle(runEvent, bundleFile, signatureFile, config, smtpFactory=smtplib.SMTP, environ=None):
+	"""Envoie le paquet chiffré et sa signature aux destinataires de
+	[share] email_to. Au-delà de max_attachment_mb (taille encodée, celle que
+	mesure le relais), le message part sans pièce jointe et l’indique. Rend
+	True si le paquet est joint."""
+	files = [Path(bundleFile)] + ([Path(signatureFile)] if signatureFile else [])
+	encodedBytes = sum(asmiraShare.encodedSize(path.stat().st_size) for path in files)
+	maxBytes = config.shareMaxAttachmentMb * 1_000_000
+	attached = encodedBytes <= maxBytes
+	runId = runEvent.get('asmira', {}).get('run', {}).get('id')
+	subject = f'[ASMIRA] Données du run {runId}'
+	if not attached:
+		subject += ' — paquet trop volumineux, non joint'
+	message = newMessage(
+		subject,
+		config.shareEmailTo,
+		shareSummary(runEvent, bundleFile, signatureFile, attached, encodedBytes, maxBytes),
+		config,
+	)
+	if attached:
+		for path in files:
+			message.add_attachment(
+				path.read_bytes(),
+				maintype='application',
+				subtype='octet-stream',
+				filename=path.name,
+			)
+	deliverMessage(message, config, smtpFactory, environ)
+	return(attached)
+
+
+def deliverMessage(message, config, smtpFactory=smtplib.SMTP, environ=None):
+	environ = os.environ if environ is None else environ
 	password = environ.get(PASSWORD_ENVIRONMENT)
 	if config.reportSmtpUsername and not password:
 		raise ValueError(f'{PASSWORD_ENVIRONMENT} est requis avec [report] smtp_username')

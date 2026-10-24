@@ -11,11 +11,13 @@ from pathlib import Path
 
 import asmiraGrade
 import asmiraReport
+import asmiraShare
 import fqdnCollect
 import webTLS
 from asmiraCommon import (
 	DEFAULT_CONFIG_PATH,
 	RUN_ID_PATTERN,
+	atomicWriteBytes,
 	atomicWriteNdjson,
 	atomicWriteText,
 	createRunId,
@@ -1113,6 +1115,8 @@ def validateConfigScope(config):
 	if config.enableDnsx:
 		fqdnCollect.requireReadableFile(config.dnsxWordlist, '[discovery] dnsx_wordlist')
 	fqdnCollect.parseDnsxResolvers(config.dnsxResolvers)
+	if config.shareEnabled and config.shareSigningKey is not None:
+		fqdnCollect.requireReadableFile(config.shareSigningKey, '[share] signing_key')
 	return(True)
 
 
@@ -1141,6 +1145,49 @@ def writeRunReport(config, reportFile, runEvent, discoveryResult, exposureEvents
 		print(f'[avertissement] bilan non envoyé par e-mail : {type(error).__name__}: {error}', file=sys.stderr)
 		return(False)
 	return(True)
+
+
+def writeShareBundle(config, runDir, runEvent, discoveryEvents, exposureEvents, reportFile):
+	"""Paquet de partage du run ([share]) : exports sans raw.endpoints et
+	bilan, chiffrés avec age, signés si une clé est configurée, écrits dans le
+	répertoire du run puis envoyés par e-mail. Comme le bilan, un échec est
+	signalé sans affecter le run."""
+	if not config.shareEnabled:
+		return(None)
+	runId = runEvent['asmira']['run']['id']
+	try:
+		reportFile = Path(reportFile)
+		bundle = asmiraShare.buildBundle(
+			runId,
+			{'discovery': discoveryEvents, 'exposure': exposureEvents, 'run': [runEvent]},
+			reportHtml=reportFile.read_text(encoding='utf-8') if reportFile.is_file() else None,
+			createdAt=utcNow(),
+		)
+		bundleFile = atomicWriteBytes(
+			Path(runDir) / asmiraShare.bundleFileName(runId),
+			asmiraShare.encryptBundle(bundle, config.shareRecipient, config.agePath),
+		)
+		signatureFile = None
+		if config.shareSigningKey is not None:
+			Path(f'{bundleFile}.sig').unlink(missing_ok=True)
+			signatureFile = asmiraShare.signFile(bundleFile, config.shareSigningKey, config.sshKeygenPath)
+		print(f'Paquet de partage : {bundleFile}')
+	except Exception as error:
+		print(f'[avertissement] paquet de partage non produit : {type(error).__name__}: {error}', file=sys.stderr)
+		return(None)
+	try:
+		attached = asmiraReport.sendShareBundle(runEvent, bundleFile, signatureFile, config)
+		if attached:
+			print(f'Paquet de partage envoyé à {", ".join(config.shareEmailTo)}')
+		else:
+			print(
+				f'[avertissement] paquet de partage trop volumineux pour [share] max_attachment_mb '
+				f'({config.shareMaxAttachmentMb} Mo) : notification envoyée sans pièce jointe',
+				file=sys.stderr,
+			)
+	except Exception as error:
+		print(f'[avertissement] paquet de partage non envoyé : {type(error).__name__}: {error}', file=sys.stderr)
+	return(bundleFile)
 
 
 def cleanRuns(runsDir, currentRunId):
@@ -1172,6 +1219,7 @@ def run(config, runId=None, maxEndpoints=None, discoveryOnly=False):
 	config.picturesDir.mkdir(parents=True, exist_ok=True)
 	config.stateDir.mkdir(parents=True, exist_ok=True)
 	discoveryResult = None
+	discoveryEvents = None
 	exposureResult = None
 	exposureEvents = None
 	previousExposureEvents = None
@@ -1314,6 +1362,16 @@ def run(config, runId=None, maxEndpoints=None, discoveryOnly=False):
 			exposureEvents,
 			previousExposureEvents,
 		)
+		# Seul un run réussi est partagé : un run en échec n’a pas d’état complet.
+		if status == 'success':
+			writeShareBundle(
+				config,
+				runDir,
+				runEvent,
+				discoveryEvents,
+				exposureEvents,
+				runDir / f'{runId}_report.html',
+			)
 		# Purge après un run réussi qui a analysé tous les endpoints : un run de
 		# découverte seule ou plafonné (--max-endpoints) garde l’analyse complète
 		# précédente ; un run en échec garde tout pour le diagnostic et la reprise.
@@ -1363,6 +1421,7 @@ def main(argv=None):
 				'active_scan': config.activeEnabled,
 				'active_authorized': config.activeAuthorized,
 				'report_email': list(config.reportEmailTo) if config.reportEmailEnabled else False,
+				'share_email': list(config.shareEmailTo) if config.shareEnabled else False,
 			}, ensure_ascii=False))
 			return(0)
 		result = run(

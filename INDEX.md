@@ -17,13 +17,15 @@ charger des rapports d'exécution potentiellement sensibles.
 | Découverte, normalisation et validation DNS | [`fqdnCollect.py`](fqdnCollect.py) |
 | Cartographie active HTTP/TLS et reporting | [`webTLS.py`](webTLS.py) |
 | Notation TLS et codes de constat | [`asmiraGrade.py`](asmiraGrade.py) |
-| Rapport d’analyse Markdown et envoi par e-mail | [`asmiraReport.py`](asmiraReport.py) |
+| Bilan HTML du run et envoi par e-mail | [`asmiraReport.py`](asmiraReport.py) |
+| Paquet de partage chiffré et import chez une entité | [`asmiraShare.py`](asmiraShare.py), [`asmiraImport.py`](asmiraImport.py) |
 | Exemple de configuration | [`config/asmira.conf.example`](config/asmira.conf.example) |
 | Unités systemd | [`deploy/systemd/`](deploy/systemd/) |
 | Assets Elasticsearch, Fleet et Kibana | [`elastic/`](elastic/) |
 | Tests de l’orchestrateur et du déploiement | [`tests/test_asmira.py`](tests/test_asmira.py), [`tests/test_deployment_assets.py`](tests/test_deployment_assets.py) |
 | Tests de la découverte | [`tests/test_fqdn_collect.py`](tests/test_fqdn_collect.py) |
 | Tests de la cartographie TLS | [`tests/test_web_tls.py`](tests/test_web_tls.py) |
+| Tests du partage des résultats | [`tests/test_share.py`](tests/test_share.py) |
 | Tests de la notation | [`tests/test_grade.py`](tests/test_grade.py) |
 
 ## Chaîne de traitement

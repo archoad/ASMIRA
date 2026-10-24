@@ -78,6 +78,23 @@ smtp_username =
 # Nombre maximal de lignes par liste détaillée du bilan.
 max_items = 50
 
+[share]
+# Paquet de partage pour les entités qui ne peuvent pas scanner : après chaque
+# run réussi, les trois exports (sans asmira.raw.endpoints) et le bilan sont
+# archivés, chiffrés avec age pour recipient (une seule clé publique age1…
+# pour tous les domaines de la sonde ; l’accès aux données se gère côté
+# import, hors d’ASMIRA), signés avec signing_key (clé SSH ed25519 sans phrase de
+# passe, lisible par le service ; facultatif mais recommandé), conservés dans
+# runs/<run-id>/ jusqu’au run suivant et envoyés à email_to par le relais
+# SMTP de [report]. Les entités l’importent avec asmiraImport.py.
+enabled = false
+email_to =
+recipient =
+signing_key =
+# Taille maximale des pièces jointes encodées (base64), en Mo : au-delà, le
+# message part sans le paquet et l’indique.
+max_attachment_mb = 10
+
 [tools]
 # Laisser vide pour utiliser la détection via PATH.
 subfinder =
@@ -88,3 +105,5 @@ openssl =
 netcat =
 chromium =
 chromedriver =
+age =
+ssh_keygen =

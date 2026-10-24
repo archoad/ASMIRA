@@ -34,6 +34,8 @@ run.
 - `asmiraGrade.py` : notation TLS des FQDN et constats associés ;
 - `asmiraReport.py` : bilan HTML autonome de chaque run et e-mail de
   synthèse ;
+- `asmiraShare.py` et `asmiraImport.py` : paquet de partage chiffré d’un run
+  et son import chez une entité qui ne scanne pas ;
 - `asmiraCommon.py` : configuration, identifiants et écritures atomiques ;
 - `elastic/` : mappings, transforms, configuration Fleet et dashboard Kibana ;
 - `deploy/` : installation Debian et unités systemd.
@@ -202,6 +204,28 @@ pièce jointe ; il passe par le relais SMTP configuré (le MTA local par défaut
 un mot de passe éventuel étant lu dans `ASMIRA_SMTP_PASSWORD`. Un échec du
 bilan ou de l’envoi est signalé dans le journal sans affecter le run. Le bilan
 décrit la surface d’attaque : il est sensible.
+
+## Partage des résultats
+
+Une entité qui ne peut pas scanner (filtrage web, pare-feu) peut recevoir les
+résultats de la sonde et alimenter son propre dashboard. Avec
+`[share] enabled = true`, chaque run réussi produit
+`runs/<run-id>/asmira_share_<run-id>.tar.gz.age` : les trois exports NDJSON
+(sans `asmira.raw.endpoints`) et le bilan, avec un manifeste d’empreintes,
+chiffrés avec age pour la clé publique unique `[share] recipient` et
+signés par la clé SSH `signing_key`. Le paquet part par le relais SMTP du
+bilan vers `[share] email_to`, sauf s’il dépasse `max_attachment_mb` (10 Mo
+encodés par défaut ; environ 3 Mo pour 2 800 FQDN). L’entité installe les
+assets Elastic avec `elastic/setup.py`, puis importe chaque paquet :
+
+```sh
+python3 asmiraImport.py --identity identity.txt --allowed-signers allowed_signers \
+	--elasticsearch-url https://elasticsearch.example.org:9200 asmira_share_<run-id>.tar.gz.age
+```
+
+L’import vérifie la signature, déchiffre et contrôle le paquet en mémoire, puis
+écrit les événements dans les data streams avec leur `event.id` comme
+identifiant : réimporter un paquet ne crée pas de doublon.
 
 ## Licence
 

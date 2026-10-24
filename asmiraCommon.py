@@ -49,6 +49,8 @@ def decodeSshServer(value):
 	return(server)
 
 
+# Clé publique age native (X25519) : « age1 » suivi de 58 caractères bech32.
+AGE_RECIPIENT_PATTERN = re.compile(r'^age1[02-9ac-hj-np-z]{58}$')
 FORBIDDEN_CONFIG_NAMES = ('api_key', 'apikey', 'password', 'private_key', 'secret', 'token')
 # Lu une seule fois à l’import : os.umask() modifie l’état global du processus et
 # ne doit pas être appelé depuis les threads de collecte ou d’analyse.
@@ -165,6 +167,31 @@ def atomicWriteText(filePath, text):
 	return(filePath)
 
 
+def atomicWriteBytes(filePath, content):
+	filePath = Path(filePath)
+	filePath.parent.mkdir(parents=True, exist_ok=True)
+	fileDescriptor, temporaryName = tempfile.mkstemp(
+		dir=filePath.parent,
+		prefix=f'.{filePath.name}.',
+		suffix='.tmp',
+	)
+	try:
+		applyCreationMode(fileDescriptor)
+		with os.fdopen(fileDescriptor, 'wb') as fileHandle:
+			fileHandle.write(content)
+			fileHandle.flush()
+			os.fsync(fileHandle.fileno())
+		os.replace(temporaryName, filePath)
+	except Exception:
+		try:
+			os.close(fileDescriptor)
+		except OSError:
+			pass
+		Path(temporaryName).unlink(missing_ok=True)
+		raise
+	return(filePath)
+
+
 def readJson(filePath, default=None):
 	filePath = Path(filePath)
 	if not filePath.is_file():
@@ -265,6 +292,13 @@ class AsmiraConfig:
 	corporateIdp: tuple = ()
 	chromiumPath: Path | None = None
 	chromedriverPath: Path | None = None
+	shareEnabled: bool = False
+	shareEmailTo: tuple = ()
+	shareRecipient: str | None = None
+	shareSigningKey: Path | None = None
+	shareMaxAttachmentMb: int = 10
+	agePath: Path | None = None
+	sshKeygenPath: Path | None = None
 
 
 EMAIL_ADDRESS_PATTERN = re.compile(r'^[^@\s<>,;"]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$')
@@ -321,6 +355,25 @@ def loadConfig(filePath=DEFAULT_CONFIG_PATH):
 	if not re.match(r'^[A-Za-z0-9.:-]+$', reportSmtpHost):
 		raise ValueError(f'[report] smtp_host invalide : {reportSmtpHost!r}')
 
+	shareEmailTo = tuple(
+		validateEmailAddress(address, '[share] email_to')
+		for address in splitConfigList(parser.get('share', 'email_to', fallback=''))
+	)
+	shareEnabled = parser.getboolean('share', 'enabled', fallback=False)
+	shareRecipient = parser.get('share', 'recipient', fallback='').strip() or None
+	if shareEnabled and not shareEmailTo:
+		raise ValueError('[share] email_to est obligatoire si [share] enabled = true')
+	if shareEnabled and shareRecipient is None:
+		raise ValueError(
+			'[share] recipient (clé publique age de la sonde) est obligatoire '
+			'si [share] enabled = true'
+		)
+	if shareRecipient is not None and not AGE_RECIPIENT_PATTERN.match(shareRecipient):
+		raise ValueError(
+			'[share] recipient doit être une seule clé publique age (age1…) : '
+			'une sonde chiffre tous ses domaines pour une même clé'
+		)
+
 	dnsTimeout = parser.getfloat('discovery', 'dns_timeout', fallback=4.0)
 	if dnsTimeout <= 0:
 		raise ValueError('[discovery] dns_timeout doit être strictement positif')
@@ -375,4 +428,11 @@ def loadConfig(filePath=DEFAULT_CONFIG_PATH):
 		corporateIdp=tuple(splitConfigList(parser.get('active_scan', 'corporate_idp', fallback=''))),
 		chromiumPath=optionalPath(parser, 'tools', 'chromium'),
 		chromedriverPath=optionalPath(parser, 'tools', 'chromedriver'),
+		shareEnabled=shareEnabled,
+		shareEmailTo=shareEmailTo,
+		shareRecipient=shareRecipient,
+		shareSigningKey=optionalPath(parser, 'share', 'signing_key'),
+		shareMaxAttachmentMb=getPositiveInt(parser, 'share', 'max_attachment_mb', 10),
+		agePath=optionalPath(parser, 'tools', 'age'),
+		sshKeygenPath=optionalPath(parser, 'tools', 'ssh_keygen'),
 	))
