@@ -206,8 +206,8 @@ confirmé fonctionnel le 3 août 2026 avec 100 endpoints.
   versionnés.
 - Le dépôt GitHub public est `archoad/ASMIRA`, sa branche principale est `main`,
   sa licence est `GPL-3.0-only`. Les versions sont des tags (`v1.0.0`
-  le 1er octobre 2026, `v1.1.0` le 22 octobre 2026, `v1.2.0` le 24 octobre
-  2026), chacun publié en
+  le 1er octobre 2026, `v1.1.0` le 22 octobre 2026, `v1.2.0` et `v1.3.0` le
+  24 octobre 2026), chacun publié en
   release GitHub avec ses notes ; GitHub fournit les archives source.
 - `AGENTS.md` et `DEPLOYMENT.md` restent des documents locaux ignorés par Git ;
   ils ne sont pas publiés dans le dépôt GitHub.
@@ -682,7 +682,7 @@ Points techniques retenus :
   transforms synchronisées sur `event.ingested`. La mise à jour impose
   `install.sh`, `elastic/setup.py` puis le complément d’`event.ingested` sur
   l’historique avant le premier run.
-- **2026-10-24 — Partage des résultats (v1.3.0, en cours).** Besoin : des
+- **2026-10-24 — Partage des résultats (v1.3.0).** Besoin : des
   entités ne peuvent pas scanner (filtrage web, pare-feu). Décisions de
   l’utilisateur : un **paquet global** (pas un par domaine ; les droits
   d’accès au dashboard sont gérés à part), sans `asmira.raw.endpoints`,
@@ -699,3 +699,11 @@ Points techniques retenus :
   `--force`. Essai sur `srv` avec les exports du 23 octobre : 2,1 Mo chiffrés,
   2,9 Mo encodés, signature et lecture validées ; `_bulk` validé seulement
   par les tests (pas d’Elasticsearch de test).
+- **2026-10-24 — Version 1.3.0.** Tag `v1.3.0` (posé par l’utilisateur,
+  repositionné sur le commit de l’import paresseux d’`elastic.setup`), release
+  GitHub publiée. Partage validé de bout en bout sur `srv` avec le run du
+  23 octobre : paquet construit, chiffré et signé sous `asmira`, e-mail reçu,
+  `--dry-run` réussi côté réception. Une seule clé age par sonde, identité
+  conservée hors de `srv`. Pièges vus à l’essai : `allowed_signers` doit
+  commencer par le nom du signataire ; `--identity` attend l’identité age,
+  pas le paquet.

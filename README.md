@@ -113,7 +113,7 @@ Les assets de déploiement orchestré et d’intégration Elastic sont fournis d
 `deploy/` et `elastic/`. Les procédures opérateur propres à l’environnement de
 production restent locales et ne sont pas versionnées. Le projet est distribué
 depuis son code source, par versions étiquetées (`v1.0.0` le 1er octobre
-2026, `v1.1.0` le 22 octobre 2026, `v1.2.0` le 24 octobre 2026) dont GitHub fournit les archives.
+2026, `v1.1.0` le 22 octobre 2026, `v1.2.0` et `v1.3.0` le 24 octobre 2026) dont GitHub fournit les archives.
 
 ## Notation TLS
 
