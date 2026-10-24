@@ -707,3 +707,12 @@ Points techniques retenus :
   conservée hors de `srv`. Pièges vus à l’essai : `allowed_signers` doit
   commencer par le nom du signataire ; `--identity` attend l’identité age,
   pas le paquet.
+- **2026-10-24 — Retours d’un testeur sur v1.3.0 (corrigés).** (1) `create`
+  ne déduplique que dans l’index d’écriture courant : `asmiraImport` relève
+  d’abord les `_id` du run dans tous les index de sauvegarde (PIT sur
+  `logs-asmira.*`, `_shard_doc`, `search_after`) et ne renvoie que les
+  absents ; `--force` complète un run, ne remplace jamais. (2)
+  `pqc_hybrid_level` écartait les certificats `unknown` : un FQDN hybride +
+  indéterminé sortait `complete`, il sort désormais `key_exchange`. (3)
+  `readBundle` exige les trois datasets et un seul événement `run` ;
+  `buildBundle` écrit toujours les trois (exposure vide en découverte seule).

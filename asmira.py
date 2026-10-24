@@ -738,9 +738,11 @@ def buildFqdnObservation(items, runId):
 	exposure = event['asmira']['exposure']
 	tls = exposure['tls']
 	if tls['pqc_kex_status'] is not None:
+		# Un certificat indéterminé ne prouve pas l’hybridation : il n’est pas
+		# écarté (sans certificat, la valeur ['unknown'] donne aussi « non »).
 		tls['pqc_hybrid_level'] = pqcHybridLevel(
 			tls['pqc_kex_status'],
-			[status for status in tls['certificate_pqc_status'] if status != 'unknown'],
+			tls['certificate_pqc_status'],
 			tls['certificate_chain_pqc_status'],
 		)
 		tls['pqc_hybrid'] = tls['pqc_kex_status'] == 'hybrid'

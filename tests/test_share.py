@@ -80,14 +80,44 @@ def testBundleRoundTripIsDeterministicAndChecked():
 	assert report == '<!doctype html>bilan'
 
 
-def testBundleWithoutExposureKeepsOtherDatasets():
+def testBundleWithoutExposureCarriesAnEmptyDataset():
 	events = sampleEvents()
 	events['exposure'] = None
 
 	manifest, readEvents, report = asmiraShare.readBundle(asmiraShare.buildBundle(RUN_ID, events))
 
-	assert set(readEvents) == {'discovery', 'run'}
+	assert manifest['files']['exposure.ndjson']['events'] == 0
+	assert readEvents['exposure'] == []
 	assert report is None
+
+
+def withoutDataset(name, content, dataset='exposure'):
+	if name == f'{dataset}.ndjson':
+		return(None)
+	if name == 'manifest.json':
+		manifest = json.loads(content)
+		del manifest['files'][f'{dataset}.ndjson']
+		return(name, json.dumps(manifest).encode('utf-8'))
+	return(name, content)
+
+
+@pytest.mark.parametrize('dataset', asmiraShare.SHARE_DATASETS)
+def testReadBundleRequiresEveryDataset(dataset):
+	data = rebuildArchive(
+		asmiraShare.buildBundle(RUN_ID, sampleEvents()),
+		lambda name, content: withoutDataset(name, content, dataset),
+	)
+
+	with pytest.raises(ValueError, match=f'{dataset}.ndjson absent'):
+		asmiraShare.readBundle(data)
+
+
+def testReadBundleRequiresASingleRunEvent():
+	events = sampleEvents()
+	events['run'].append(shareEventOf('run', 'r2'))
+
+	with pytest.raises(ValueError, match='un seul événement'):
+		asmiraShare.readBundle(asmiraShare.buildBundle(RUN_ID, events))
 
 
 @pytest.mark.parametrize('transform, message', [
@@ -407,14 +437,57 @@ def testBulkImportCountsCreatedAndExistingEvents():
 		asmiraImport.bulkImport(None, sampleEvents()['exposure'], post=lambda client, body: bulkResponse(201, 400))
 
 
+def testBulkImportSkipsEventsAlreadyIndexed():
+	posted = []
+
+	def post(client, body):
+		lines = body.decode('utf-8').splitlines()
+		posted.extend(json.loads(line)['create']['_id'] for line in lines[::2])
+		return(bulkResponse(*([201] * (len(lines) // 2))))
+
+	assert asmiraImport.bulkImport(None, sampleEvents()['exposure'], post=post, existingIds={'e1'}) == (1, 1)
+	assert posted == ['e2']
+
+
 class FakeClient:
-	def __init__(self, runCount=0):
+	"""Elasticsearch simulé : _count du run, point-in-time et pages de
+	_search sur les événements déjà indexés (tous index de sauvegarde)."""
+
+	def __init__(self, runCount=0, indexedIds=(), page=None):
 		self.runCount = runCount
+		self.indexedIds = list(indexedIds)
+		self.page = page
 		self.requests = []
 
 	def request(self, method, path, payload=None, allowedStatuses=()):
 		self.requests.append((method, path, payload))
-		return({'count': self.runCount})
+		if path.endswith('/_count'):
+			return({'count': self.runCount})
+		if path.endswith('/_pit?keep_alive=1m'):
+			return({'id': 'pit-1'})
+		if path == '_search':
+			start = payload.get('search_after', [0])[0]
+			size = self.page or payload['size']
+			hits = [
+				{'_id': eventId, 'sort': [index + 1]}
+				for index, eventId in enumerate(self.indexedIds)
+			][start:start + size]
+			return({'pit_id': 'pit-2', 'hits': {'hits': hits}})
+		return({})
+
+
+def testExistingEventIdsPagesThroughEveryBackingIndex(monkeypatch):
+	monkeypatch.setattr(asmiraImport, 'SEARCH_PAGE', 2)
+	client = FakeClient(indexedIds=['d1', 'e1', 'e2'], page=2)
+
+	assert asmiraImport.existingEventIds(client, RUN_ID) == {'d1', 'e1', 'e2'}
+	searches = [payload for method, path, payload in client.requests if path == '_search']
+	assert len(searches) == 2
+	assert searches[0]['query'] == {'term': {'asmira.run.id': RUN_ID}}
+	assert searches[1]['search_after'] == [2]
+	assert searches[1]['pit']['id'] == 'pit-2'
+	assert client.requests[0][1] == 'logs-asmira.*/_pit?keep_alive=1m'
+	assert client.requests[-1] == ('DELETE', '_pit', {'id': 'pit-2'})
 
 
 def importMain(monkeypatch, tmp_path, client, extraArgs=()):
@@ -451,7 +524,7 @@ def testImportWritesDatasetsWithTheRunLast(monkeypatch, tmp_path, capsys):
 		'logs-asmira.exposure-default', 'logs-asmira.exposure-default',
 		'logs-asmira.run-default',
 	]
-	assert client.requests == [('POST', 'logs-asmira.run-*/_count', {'query': {'term': {'asmira.run.id': RUN_ID}}})]
+	assert client.requests[0] == ('POST', 'logs-asmira.run-*/_count', {'query': {'term': {'asmira.run.id': RUN_ID}}})
 	assert reportFile.read_text(encoding='utf-8') == '<!doctype html>bilan'
 	output = capsys.readouterr().out
 	assert 'signé par asmira-sonde' in output
@@ -466,6 +539,18 @@ def testImportSkipsARunAlreadyImported(monkeypatch, tmp_path, capsys):
 	assert 'déjà importé' in capsys.readouterr().out
 	code, posted = importMain(monkeypatch, tmp_path, FakeClient(runCount=1), ['--force'])
 	assert len(posted) == 4
+
+
+def testInterruptedImportResumesWithoutDuplicatesAfterRollover(monkeypatch, tmp_path, capsys):
+	# Import interrompu avant l’événement run, puis rollover : discovery et e1
+	# sont dans un ancien index de sauvegarde, où create ne les verrait pas.
+	code, posted = importMain(monkeypatch, tmp_path, FakeClient(indexedIds=['d1', 'e1']))
+
+	assert code == 0
+	assert posted == ['logs-asmira.exposure-default', 'logs-asmira.run-default']
+	output = capsys.readouterr().out
+	assert 'discovery : 0 créé(s), 1 déjà présent(s)' in output
+	assert 'exposure : 1 créé(s), 1 déjà présent(s)' in output
 
 
 def testImportRequiresSignatureUnlessAllowed(monkeypatch, tmp_path, capsys):

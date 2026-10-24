@@ -5,7 +5,9 @@ dans l’Elasticsearch d’une entité qui ne scanne pas elle-même. Le paquet e
 vérifié (signature), déchiffré (age) et contrôlé (manifeste) en mémoire, puis
 ses événements sont écrits dans les data streams logs-asmira.*-default
 installés par elastic/setup.py ; les transforms et le dashboard font le reste.
-L’import est idempotent : chaque événement garde son event.id comme _id."""
+L’import est idempotent : chaque événement garde son event.id comme _id, et
+les événements du run déjà présents dans un index de sauvegarde quelconque
+(rollover compris) ne sont pas réécrits."""
 
 import argparse
 import json
@@ -19,6 +21,8 @@ import asmiraShare
 
 BULK_ACTIONS = 1000
 BULK_BYTES = 8 * 1024 * 1024
+SEARCH_PAGE = 5000
+DATA_STREAMS = 'logs-asmira.*'
 # Le run en dernier : sa présence atteste un import complet, qu’un import
 # interrompu ne laisse donc pas croire terminé.
 IMPORT_ORDER = ('discovery', 'exposure', 'run')
@@ -66,11 +70,43 @@ def postBulk(client, body):
 		raise RuntimeError(f'_bulk : {error}') from error
 
 
-def bulkImport(client, events, post=postBulk):
+def existingEventIds(client, runId):
+	"""_id des événements du run déjà indexés, dans tous les index de
+	sauvegarde des data streams : create ne déduplique que dans l’index
+	d’écriture courant, qui change à chaque rollover."""
+	pit = client.request('POST', f'{DATA_STREAMS}/_pit?keep_alive=1m', allowedStatuses=(404,))
+	if not pit or 'id' not in pit:
+		return(set())
+	pitId, after, ids = pit['id'], None, set()
+	try:
+		while True:
+			query = {
+				'size': SEARCH_PAGE,
+				'query': {'term': {'asmira.run.id': runId}},
+				'_source': False,
+				'track_total_hits': False,
+				'pit': {'id': pitId, 'keep_alive': '1m'},
+				'sort': [{'_shard_doc': 'asc'}],
+			}
+			if after is not None:
+				query['search_after'] = after
+			response = client.request('POST', '_search', query)
+			hits = response.get('hits', {}).get('hits', [])
+			pitId = response.get('pit_id', pitId)
+			ids.update(hit['_id'] for hit in hits)
+			if len(hits) < SEARCH_PAGE:
+				return(ids)
+			after = hits[-1]['sort']
+	finally:
+		client.request('DELETE', '_pit', {'id': pitId}, allowedStatuses=(404,))
+
+
+def bulkImport(client, events, post=postBulk, existingIds=frozenset()):
 	"""Nombre d’événements créés et déjà présents ; toute autre erreur
 	interrompt l’import (le run, importé en dernier, reste alors absent)."""
-	created = existing = 0
-	for body in bulkBodies(events):
+	pending = [event for event in events if event['event']['id'] not in existingIds]
+	created, existing = 0, len(events) - len(pending)
+	for body in bulkBodies(pending):
 		response = post(client, body)
 		for item in response.get('items', []):
 			result = item.get('create', {})
@@ -124,7 +160,7 @@ def parseArguments(argv=None):
 	parser.add_argument('--ca-cert', type=Path)
 	parser.add_argument('--report', type=Path, help='fichier où écrire le bilan HTML du run')
 	parser.add_argument('--dry-run', action='store_true', help='vérifier et lire le paquet sans rien importer')
-	parser.add_argument('--force', action='store_true', help='réimporter un run déjà présent')
+	parser.add_argument('--force', action='store_true', help='reprendre un run déjà présent (seuls les événements absents sont écrits)')
 	parser.add_argument('--age', type=Path, help='chemin de age (défaut : PATH)')
 	parser.add_argument('--ssh-keygen', type=Path, help='chemin de ssh-keygen (défaut : PATH)')
 	args = parser.parse_args(argv)
@@ -151,7 +187,7 @@ def main(argv=None, clientFactory=clientFromEnvironment, post=postBulk):
 	try:
 		signer, manifest, events, report = openBundle(args)
 		runId = manifest['run_id']
-		counts = {dataset: len(events.get(dataset, [])) for dataset in IMPORT_ORDER}
+		counts = {dataset: len(events[dataset]) for dataset in IMPORT_ORDER}
 		print(
 			f'Paquet du run {runId}'
 			+ (f', signé par {signer}' if signer else ', non signé')
@@ -164,12 +200,11 @@ def main(argv=None, clientFactory=clientFromEnvironment, post=postBulk):
 			return(0)
 		client = clientFactory(args.elasticsearch_url, 'ELASTIC', args.ca_cert)
 		if not args.force and runAlreadyImported(client, runId):
-			print(f'Run {runId} déjà importé : rien à faire (--force pour réimporter).')
+			print(f'Run {runId} déjà importé : rien à faire (--force pour compléter un import).')
 			return(0)
+		existingIds = existingEventIds(client, runId)
 		for dataset in IMPORT_ORDER:
-			if dataset not in events:
-				continue
-			created, existing = bulkImport(client, events[dataset], post=post)
+			created, existing = bulkImport(client, events[dataset], post=post, existingIds=existingIds)
 			print(f'{dataset} : {created} créé(s), {existing} déjà présent(s)')
 	except (OSError, RuntimeError, ValueError, KeyError) as error:
 		print(f'[erreur] {error}', file=sys.stderr)

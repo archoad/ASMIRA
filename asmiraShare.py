@@ -66,13 +66,13 @@ def addMember(archive, name, content):
 
 def buildBundle(runId, eventsByDataset, reportHtml=None, createdAt=None):
 	"""Archive tar.gz en mémoire : manifest.json (format, run-id, empreinte et
-	nombre d’événements de chaque fichier), puis les NDJSON et le bilan."""
+	nombre d’événements de chaque fichier), puis les NDJSON et le bilan. Les
+	trois datasets sont toujours présents, vides au besoin (découverte seule) :
+	l’import refuse un paquet qui en omet un."""
 	members = {}
 	files = {}
 	for dataset in SHARE_DATASETS:
-		events = eventsByDataset.get(dataset)
-		if events is None:
-			continue
+		events = eventsByDataset.get(dataset) or []
 		content = ndjsonBytes(shareEvent(event) for event in events)
 		name = datasetFileName(dataset)
 		members[name] = content
@@ -134,6 +134,9 @@ def readBundle(data):
 	files = manifest.get('files') or {}
 	if set(files) != set(contents):
 		raise ValueError('Paquet refusé : contenu différent du manifeste')
+	missing = [name for name in map(datasetFileName, SHARE_DATASETS) if name not in files]
+	if missing:
+		raise ValueError(f'Paquet refusé : {", ".join(missing)} absent(s)')
 	events = {}
 	for name, content in contents.items():
 		if hashlib.sha256(content).hexdigest() != files[name].get('sha256'):
@@ -150,6 +153,8 @@ def readBundle(data):
 			if record.get('data_stream', {}).get('dataset') != f'asmira.{dataset}':
 				raise ValueError(f'Paquet refusé : {name} contient un événement d’un autre dataset')
 		events[dataset] = records
+	if len(events['run']) != 1:
+		raise ValueError('Paquet refusé : run.ndjson doit contenir un seul événement')
 	report = contents.get(REPORT_NAME)
 	return(manifest, events, None if report is None else report.decode('utf-8'))
 

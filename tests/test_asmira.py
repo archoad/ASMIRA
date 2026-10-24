@@ -505,6 +505,9 @@ def testLegacyObservationWithSingleGroupIsClassified():
 	('classical', ['hybrid'], [], 'signature'),
 	('pure', ['pqc'], [], 'none'),
 	('hybrid', [], [], 'key_exchange'),
+	# Un certificat indéterminé ne prouve pas l’hybridation.
+	('hybrid', ['hybrid', 'unknown'], [], 'key_exchange'),
+	('hybrid', ['unknown'], [], 'key_exchange'),
 ])
 def testPqcHybridLevel(kex, certificate, chain, level):
 	assert asmira.pqcHybridLevel(kex, certificate, chain) == level
@@ -737,6 +740,18 @@ def testExposureEventsFlagHybridAdoptionAndAcceptedGroups():
 	assert tls['pqc_hybrid'] is True
 	assert tls['pqc_hybrid_level'] == 'key_exchange'
 	assert tls['grade'] == 'A+'
+
+
+def testHybridLevelKeepsUnknownCertificates():
+	hybrid = {'pqc_kex_supported': True, 'pqc_kex_group': 'X25519MLKEM768'}
+	event = asmira.buildExposureEvents([
+		gradedItem(ip='192.0.2.10', pqc_status='hybrid', **hybrid),
+		gradedItem(ip='192.0.2.11', pqc_status='unknown', certificate_sha256='b' * 64, **hybrid),
+	], '20260731T200000Z-12345678')[0]
+	tls = event['asmira']['exposure']['tls']
+
+	assert sorted(tls['certificate_pqc_status']) == ['hybrid', 'unknown']
+	assert tls['pqc_hybrid_level'] == 'key_exchange'
 
 
 def testExposureEventsCarryPqcKexAndFinding():
