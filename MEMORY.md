@@ -206,7 +206,8 @@ confirmé fonctionnel le 3 août 2026 avec 100 endpoints.
   versionnés.
 - Le dépôt GitHub public est `archoad/ASMIRA`, sa branche principale est `main`,
   sa licence est `GPL-3.0-only`. Les versions sont des tags (`v1.0.0`
-  le 1er octobre 2026, `v1.1.0` le 22 octobre 2026), chacun publié en
+  le 1er octobre 2026, `v1.1.0` le 22 octobre 2026, `v1.2.0` le 24 octobre
+  2026), chacun publié en
   release GitHub avec ses notes ; GitHub fournit les archives source.
 - `AGENTS.md` et `DEPLOYMENT.md` restent des documents locaux ignorés par Git ;
   ils ne sont pas publiés dans le dépôt GitHub.
@@ -674,3 +675,10 @@ Points techniques retenus :
   l’export.
   Également : casse canonique des schémas HTTP (`basic` → `Basic`), et
   certificat auto-signé expiré de nouveau reconnu comme auto-signé.
+- **2026-10-24 — Version 1.2.0.** Tag `v1.2.0` (posé par l’utilisateur sur
+  « Bugs corrections »), publié en release GitHub. Notes : PQC des
+  certificats (ANSSI-FT-115), SSH post-quantique, authentification web, 37
+  codes de constat, constats en attente, purge des runs, notes ordonnées,
+  transforms synchronisées sur `event.ingested`. La mise à jour impose
+  `install.sh`, `elastic/setup.py` puis le complément d’`event.ingested` sur
+  l’historique avant le premier run.
