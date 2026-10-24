@@ -502,6 +502,29 @@ def testExtractCertificateReadsRealMlDsaCertificates(fileName, status, selfSigne
 	assert result['self-signed'] is selfSigned
 
 
+@pytest.mark.parametrize('validFrom, validDays', [
+	(datetime.now(timezone.utc) - timedelta(days=400), 30),
+	(datetime.now(timezone.utc) - timedelta(days=1), 30),
+])
+def testIsSelfSignedCertIgnoresValidityPeriod(validFrom, validDays):
+	# Un certificat auto-signé expiré restait classé « non auto-signé » : la
+	# vérification d’OpenSSL contrôlait aussi la date.
+	key = ec.generate_private_key(ec.SECP256R1())
+	name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, 'auto.example.com')])
+	certificate = (
+		x509.CertificateBuilder()
+		.subject_name(name)
+		.issuer_name(name)
+		.public_key(key.public_key())
+		.serial_number(1)
+		.not_valid_before(validFrom)
+		.not_valid_after(validFrom + timedelta(days=validDays))
+		.sign(key, hashes.SHA256())
+	)
+
+	assert webTLS.isSelfSignedCert(certificate.public_bytes(serialization.Encoding.PEM)) is True
+
+
 def testExtractTLSDataReadsTls13CipherLine():
 	privateKey = rsa.generate_private_key(public_exponent=65537, key_size=2048)
 	certificate = buildCertificate(privateKey).decode()
@@ -1534,6 +1557,8 @@ def webPage(url='https://www.example.com/', **values):
 
 @pytest.mark.parametrize('httpAuth, pages, expected', [
 	({'status': 401, 'schemes': ['Basic']}, [], {'web_auth': 'http', 'web_auth_http_schemes': ['Basic']}),
+	# Casse observée en production : le nom canonique est restitué.
+	({'status': 401, 'schemes': ['basic', 'ntlm']}, [], {'web_auth_http_schemes': ['Basic', 'NTLM']}),
 	# Bearer protège une API : pas d’authentification interactive.
 	({'status': 401, 'schemes': ['Bearer']}, [], {'web_auth': 'unknown'}),
 	(None, [], {'web_auth': 'unknown'}),

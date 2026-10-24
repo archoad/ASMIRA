@@ -2006,7 +2006,11 @@
               "server.domain"
             ],
             "limit": 1000,
-            "label": "FQDN"
+            "label": "FQDN",
+            "rank_by": {
+              "type": "alphabetical",
+              "direction": "asc"
+            }
           }
         ],
         "metrics": [

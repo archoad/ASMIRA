@@ -659,3 +659,18 @@ Points techniques retenus :
   dégradé rouge sombre → vert fixé par note ; le graphe Vega partage la palette
   (M passé du violet au rouge). Kibana suit l’ordre des lignes ES|QL ; rendu
   à confirmer à l’écran par l’utilisateur.
+- **2026-10-24 — Run du 23 octobre (premier avec l’authentification web).**
+  Succès en 8 h 01 (phase web : 1 960 FQDN en 67 min avec 4 navigateurs) :
+  1 505 sans authentification, 208 formulaires locaux, 104 fournisseurs
+  d’identité, 27 HTTP natif, 116 indéterminés (pages non chargées, surtout
+  `laposte.fr` et `cnp.fr`). `SSH_LEGACY_MAC` apparu sur 41 FQDN,
+  `SSH_WEAK_ALGORITHMS` corrigé sur 17 ; une valeur par adresse dans
+  `ssh.servers`. Défaut trouvé : transforms `latest` synchronisées sur
+  `@timestamp`, checkpoint tombé pendant l’ingestion, 1 185 FQDN restés sur le
+  run précédent. Correction : pipeline final `asmira-ingested`
+  (`event.ingested`), synchronisation sur ce champ ; historique (254 557
+  documents) complété par `_update_by_query` avec ce pipeline, puis transforms
+  recréées : 2 912 FQDN et 8 408 candidats reconstruits, panneaux conformes à
+  l’export.
+  Également : casse canonique des schémas HTTP (`basic` → `Basic`), et
+  certificat auto-signé expiré de nouveau reconnu comme auto-signé.

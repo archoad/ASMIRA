@@ -56,6 +56,11 @@ def testElasticJsonAssetsAreValidAndDashboardIsGlobal():
 	assert fqdnTransform['latest']['unique_key'] == ['server.domain']
 	assert fqdnTransform['dest']['index'] == 'asmira-fqdn-latest'
 	assert 'retention_policy' not in fqdnTransform
+	for transform in (fqdnTransform, payloads['asmira-discovery-latest-transform.json']):
+		# Ingestion à la fin du run, des heures après l’observation : la
+		# synchronisation sur @timestamp perdait les événements tardifs.
+		assert transform['sync']['time']['field'] == 'event.ingested'
+		assert transform['latest']['sort'] == '@timestamp'
 	assert dashboard['title'] == '[archoad] Asmira — Surface d’exposition globale'
 	assert len(dashboard['panels']) == 58
 	controls = dashboard['pinned_panels']
@@ -264,6 +269,19 @@ def testElasticJsonAssetsAreValidAndDashboardIsGlobal():
 	assert linkFormat['id'] == 'url'
 	assert linkFormat['params']['labelTemplate'] == 'Ouvrir le site'
 	assert linkFormat['params']['openLinkInCurrentTab'] is False
+	# Sans rank_by, Kibana classe les lignes sur la première métrique : un
+	# last_value de texte fait échouer la recherche (« pipeline aggregations
+	# may not refer to non-numeric metrics collected by top_metrics »).
+	for panel in dashboard['panels']:
+		config = panel['config']
+		if config.get('type') != 'data_table' or config['data_source']['type'] == 'esql':
+			continue
+		for row in config.get('rows', []):
+			if row.get('operation') != 'terms':
+				continue
+			rankBy = row.get('rank_by', {'type': 'metric', 'metric_index': 0})
+			if rankBy['type'] == 'metric':
+				assert config['metrics'][rankBy.get('metric_index', 0)]['operation'] != 'last_value', config['title']
 	portMappings = mappings['asmira']['properties']['exposure']['properties']['port']['properties']
 	for port in ('25', '465', '587', '993', '995', '8080', '8443'):
 		assert portMappings[port]['properties']['certificate_pqc']['type'] == 'keyword'
@@ -437,6 +455,20 @@ def testElasticSetupUpdatesExistingExposureMappings():
 			putPayloads[path]['properties']['asmira']['properties']['exposure']['properties']
 		)
 		assert pushedExposure == expectedExposure
+	pipeline = putPayloads['_ingest/pipeline/asmira-ingested']
+	assert pipeline['processors'] == [
+		{'set': {'field': 'event.ingested', 'value': '{{{_ingest.timestamp}}}'}},
+	]
+	assert [path for method, path, payload in client.calls].index('_ingest/pipeline/asmira-ingested') == 0
+	for dataset in elasticSetup.DATA_STREAMS:
+		template = putPayloads[f'_index_template/asmira-{dataset}']
+		assert template['template']['settings'] == {'index.final_pipeline': 'asmira-ingested'}
+		assert putPayloads[f'logs-asmira.{dataset}-default/_settings'] == {
+			'index': {'final_pipeline': 'asmira-ingested'},
+		}
+		assert ('PUT', f'logs-asmira.{dataset}-default/_mapping', {'properties': {
+			'event': {'properties': {'ingested': {'type': 'date'}}},
+		}}) in client.calls
 	runMapping = putPayloads['logs-asmira.run-default/_mapping']
 	runCounts = (
 		runMapping['properties']['asmira']['properties']['run']['properties']

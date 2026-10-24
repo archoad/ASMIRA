@@ -425,6 +425,11 @@ def isSelfSignedCert(certPEM):
 		return(False)
 	store = OpenSSL.crypto.X509Store()
 	store.add_cert(cert)
+	# Seule la signature compte : vérifiée à la date de début de validité, un
+	# certificat auto-signé expiré reste auto-signé.
+	notBefore = cert.get_notBefore()
+	if notBefore:
+		store.set_time(datetime.strptime(notBefore.decode('ascii'), '%Y%m%d%H%M%SZ'))
 	context = OpenSSL.crypto.X509StoreContext(store, cert)
 	try:
 		context.verify_certificate()
@@ -1102,7 +1107,13 @@ CHROMIUM_PATH = None
 CHROMEDRIVER_PATH = None
 # Schémas d’authentification HTTP interactifs : aucun second facteur possible.
 # Bearer, réservé aux API, n’en fait pas partie.
-HTTP_INTERACTIVE_AUTH_SCHEMES = ('basic', 'digest', 'ntlm', 'negotiate')
+# Nom canonique : les serveurs écrivent aussi « basic » ou « ntlm ».
+HTTP_INTERACTIVE_AUTH_SCHEMES = {
+	'basic': 'Basic',
+	'digest': 'Digest',
+	'ntlm': 'NTLM',
+	'negotiate': 'Negotiate',
+}
 HTTP_AUTH_SCHEME = re.compile(r'(?:^|,)\s*([A-Za-z][A-Za-z0-9!#$%&\'*+.^_`|~-]*)(?=\s|,|$)')
 # (nom, motif du nom d’hôte, motif du chemin) : un fournisseur reconnu à son
 # domaine ou, pour les logiciels installés chez l’organisation, à son chemin.
@@ -1234,7 +1245,7 @@ def interactiveHttpSchemes(httpAuth):
 	if not httpAuth or httpAuth.get('status') != 401:
 		return([])
 	return([
-		scheme
+		HTTP_INTERACTIVE_AUTH_SCHEMES[scheme.lower()]
 		for scheme in httpAuth.get('schemes') or []
 		if scheme.lower() in HTTP_INTERACTIVE_AUTH_SCHEMES
 	])

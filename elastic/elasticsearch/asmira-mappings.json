@@ -21,7 +21,8 @@
             "type": { "type": "keyword" },
             "dataset": { "type": "keyword" },
             "action": { "type": "keyword" },
-            "outcome": { "type": "keyword" }
+            "outcome": { "type": "keyword" },
+            "ingested": { "type": "date" }
           }
         },
         "observer": {

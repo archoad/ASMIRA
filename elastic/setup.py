@@ -16,6 +16,11 @@ DATA_STREAMS = ('discovery', 'exposure', 'run')
 LEGACY_EXPOSURE_LATEST = 'asmira-exposure-latest'
 DOMAIN_GRAPH_PANEL = 'asmira-domain-graph'
 DOMAIN_GRAPH_TITLE = 'Graphe des FQDN par domaine'
+# Pose event.ingested : les événements d’un run portent l’heure d’observation
+# (@timestamp) mais ne sont ingérés qu’à l’écriture de l’export, des heures
+# plus tard ; une transform synchronisée sur @timestamp perdrait ceux qui
+# arrivent après son checkpoint.
+INGEST_PIPELINE = 'asmira-ingested'
 TRANSFORM_UPDATE_FIELDS = (
 	'_meta',
 	'description',
@@ -82,6 +87,9 @@ def buildIndexTemplate(dataset, retentionDays):
 		'data_stream': {},
 		'composed_of': ['asmira-mappings'],
 		'template': {
+			'settings': {
+				'index.final_pipeline': INGEST_PIPELINE,
+			},
 			'lifecycle': {
 				'data_retention': f'{retentionDays}d',
 			},
@@ -119,6 +127,21 @@ def configureElasticsearch(client, retentionDays):
 	mappingAsset = loadJson('elasticsearch/asmira-mappings.json')
 	client.request(
 		'PUT',
+		f'_ingest/pipeline/{INGEST_PIPELINE}',
+		loadJson('elasticsearch/asmira-ingest-pipeline.json'),
+	)
+	ingestedMapping = {
+		'properties': {
+			'event': {
+				'properties': {
+					'ingested': mappingAsset['template']['mappings']['properties']
+					['event']['properties']['ingested'],
+				},
+			},
+		},
+	}
+	client.request(
+		'PUT',
 		'_component_template/asmira-mappings',
 		mappingAsset,
 	)
@@ -136,6 +159,14 @@ def configureElasticsearch(client, retentionDays):
 		)
 		if existing and existing.get('status') == 404:
 			client.request('PUT', f'_data_stream/{dataStream}')
+		# Le gabarit ne s’applique qu’au prochain index : l’index d’écriture
+		# existant reçoit le pipeline et le champ tout de suite.
+		client.request(
+			'PUT',
+			f'{dataStream}/_settings',
+			{'index': {'final_pipeline': INGEST_PIPELINE}},
+		)
+		client.request('PUT', f'{dataStream}/_mapping', ingestedMapping)
 	serverProperties = mappingAsset['template']['mappings']['properties']['server']['properties']
 	exposureProperties = (
 		mappingAsset['template']['mappings']['properties']['asmira']['properties']

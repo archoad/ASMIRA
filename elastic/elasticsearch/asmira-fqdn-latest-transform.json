@@ -12,7 +12,7 @@
   },
   "sync": {
     "time": {
-      "field": "@timestamp",
+      "field": "event.ingested",
       "delay": "60s"
     }
   },

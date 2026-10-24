@@ -1,0 +1,14 @@
+{
+  "description": "Horodatage d’ingestion Asmira : les transforms latest se synchronisent sur event.ingested, @timestamp restant l’heure d’observation",
+  "processors": [
+    {
+      "set": {
+        "field": "event.ingested",
+        "value": "{{{_ingest.timestamp}}}"
+      }
+    }
+  ],
+  "_meta": {
+    "managed_by": "asmira"
+  }
+}
